@@ -1,194 +1,294 @@
 -- =========================================================================
--- GoFoods Database Schema для Supabase (PostgreSQL)
+-- GoFoods — полная схема базы данных для Supabase
+-- Запусти этот файл в Supabase: SQL Editor → New query → Run
 -- =========================================================================
 
--- Включить расширения
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "postgis"; -- для координат
+-- Расширения
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";   -- генерация UUID
+CREATE EXTENSION IF NOT EXISTS "postgis";      -- работа с координатами
 
--- ─────────────────────────────────────────────────────────────────────────
--- Таблица: users (пользователи)
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 1. USERS
+-- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.users (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  auth_id UUID REFERENCES auth.users(id) ON DELETE CASCADE, -- связь с Supabase Auth
-  
-  -- Основная информация
-  email VARCHAR(255) UNIQUE NOT NULL,
-  display_name VARCHAR(255),
-  avatar_url TEXT,
-  phone VARCHAR(50),
-  bio TEXT,
-  
-  -- Адрес и координаты
-  address TEXT,
-  location GEOGRAPHY(POINT, 4326), -- PostGIS: lat, lng
-  
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  auth_id       UUID UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+
+  email         VARCHAR(255) UNIQUE NOT NULL,
+  display_name  VARCHAR(255),
+  avatar_url    TEXT,
+  phone         VARCHAR(50),
+  bio           TEXT,
+  address       TEXT,
+  location      GEOGRAPHY(POINT, 4326),   -- координаты (PostGIS)
+
   -- Telegram
-  telegram_id VARCHAR(50) UNIQUE,
+  telegram_id       VARCHAR(50) UNIQUE,
   telegram_username VARCHAR(100),
-  telegram_notify BOOLEAN DEFAULT TRUE,
-  
+  telegram_notify   BOOLEAN DEFAULT TRUE,
+
   -- Роль и статус
-  role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'cook', 'admin')),
-  is_verified BOOLEAN DEFAULT FALSE,
-  suspended BOOLEAN DEFAULT FALSE,
-  
-  -- Временные метки
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  role         VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'cook', 'admin')),
+  is_verified  BOOLEAN DEFAULT FALSE,
+  suspended    BOOLEAN DEFAULT FALSE,
+
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Индексы для быстрого поиска
-CREATE INDEX idx_users_telegram_id ON public.users(telegram_id);
-CREATE INDEX idx_users_role ON public.users(role);
-CREATE INDEX idx_users_email ON public.users(email);
-CREATE INDEX idx_users_location ON public.users USING GIST(location); -- для геопоиска
+CREATE INDEX IF NOT EXISTS idx_users_auth_id      ON public.users(auth_id);
+CREATE INDEX IF NOT EXISTS idx_users_telegram_id  ON public.users(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_users_role         ON public.users(role);
+CREATE INDEX IF NOT EXISTS idx_users_location     ON public.users USING GIST(location);
 
--- ─────────────────────────────────────────────────────────────────────────
--- Таблица: food_items (блюда)
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 2. FOOD_ITEMS (блюда)
+-- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.food_items (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  cook_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  
-  -- Информация о блюде
-  name VARCHAR(255) NOT NULL,
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  cook_id     UUID REFERENCES public.users(id) ON DELETE CASCADE,
+
+  name        VARCHAR(255) NOT NULL,
   description TEXT,
-  category VARCHAR(50), -- homemade, restaurant, bakery
-  price DECIMAL(10, 2) NOT NULL,
-  
-  -- Медиа
-  image_url TEXT,
-  
-  -- Статус
-  status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'sold', 'unavailable')),
+  category    VARCHAR(50),               -- homemade, restaurant, bakery и т.д.
+  tags        TEXT[]       DEFAULT '{}',
+  price       DECIMAL(10, 2) NOT NULL DEFAULT 0,
   is_donation BOOLEAN DEFAULT FALSE,
-  
-  -- Временные метки
+
+  -- Изображения
+  image_url   TEXT,
+  images      TEXT[]       DEFAULT '{}', -- массив URL
+
+  -- Доставка / самовывоз
+  pickup               BOOLEAN DEFAULT FALSE,
+  delivery             BOOLEAN DEFAULT FALSE,
+  pickup_address       JSONB,
+  delivery_radius_km   DECIMAL(5, 1) DEFAULT 0,
+
+  -- Количество и доступность
+  quantity        INTEGER DEFAULT 1,
+  available_from  TIMESTAMPTZ DEFAULT NOW(),
+  available_until TIMESTAMPTZ,
+
+  -- Локация повара в реальном времени
+  live_location  JSONB,
+
+  status  VARCHAR(20) DEFAULT 'available'
+          CHECK (status IN ('available', 'sold', 'unavailable')),
+
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_food_items_cook_id ON public.food_items(cook_id);
-CREATE INDEX idx_food_items_status ON public.food_items(status);
+CREATE INDEX IF NOT EXISTS idx_food_items_cook_id  ON public.food_items(cook_id);
+CREATE INDEX IF NOT EXISTS idx_food_items_status   ON public.food_items(status);
+CREATE INDEX IF NOT EXISTS idx_food_items_category ON public.food_items(category);
 
--- ─────────────────────────────────────────────────────────────────────────
--- Таблица: orders (заказы)
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 3. REQUESTS (запросы на получение блюда)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.requests (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  food_item_id UUID REFERENCES public.food_items(id) ON DELETE CASCADE,
+  requester_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  owner_id     UUID REFERENCES public.users(id) ON DELETE CASCADE,
+
+  message             TEXT DEFAULT '',
+  status              VARCHAR(30) DEFAULT 'pending'
+                      CHECK (status IN (
+                        'pending','accepted','rejected',
+                        'collected','cancelled','completed'
+                      )),
+  pickup_or_delivery  VARCHAR(20) DEFAULT 'pickup'
+                      CHECK (pickup_or_delivery IN ('pickup','delivery')),
+  proposed_time       TIMESTAMPTZ,
+
+  -- Геолокация участников
+  requester_location  JSONB,
+  owner_location      JSONB,
+  handoff_point       JSONB,
+
+  -- Маршрут и трекинг
+  route_path    JSONB DEFAULT '[]',
+  share_enabled BOOLEAN DEFAULT FALSE,
+  share_token   VARCHAR(100) UNIQUE,
+
+  -- Оценка
+  rating    DECIMAL(2, 1),
+  feedback  TEXT,
+
+  -- Временные метки
+  confirmed_at  TIMESTAMPTZ,
+  completed_at  TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_requests_food_item_id  ON public.requests(food_item_id);
+CREATE INDEX IF NOT EXISTS idx_requests_requester_id  ON public.requests(requester_id);
+CREATE INDEX IF NOT EXISTS idx_requests_owner_id      ON public.requests(owner_id);
+CREATE INDEX IF NOT EXISTS idx_requests_status        ON public.requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_share_token   ON public.requests(share_token);
+
+-- =========================================================================
+-- 4. ORDERS (заказы с доставкой через Uber)
+-- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.orders (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  
-  -- Участники
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   customer_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  cook_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  telegram_id VARCHAR(50) NOT NULL, -- для отправки уведомлений
-  
-  -- Заказанные блюда (JSON)
-  items JSONB NOT NULL,
-  -- Пример: [{"food_id": "uuid", "name": "Плов", "quantity": 2, "price": 8.50}]
-  
-  -- Стоимость
-  total_price DECIMAL(10, 2) NOT NULL,
-  delivery_fee DECIMAL(10, 2) DEFAULT 0,
-  cook_earnings DECIMAL(10, 2),
-  
-  -- Адрес доставки
-  delivery_address TEXT NOT NULL,
-  delivery_coords GEOGRAPHY(POINT, 4326), -- lat, lng
-  delivery_phone VARCHAR(50) NOT NULL,
-  delivery_notes TEXT,
-  
+  cook_id     UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  telegram_id VARCHAR(50) NOT NULL,
+
+  items         JSONB NOT NULL,
+  -- Пример: [{"food_id":"uuid","name":"Плов","quantity":2,"price":8.50}]
+
+  total_price    DECIMAL(10, 2) NOT NULL,
+  delivery_fee   DECIMAL(10, 2) DEFAULT 0,
+  cook_earnings  DECIMAL(10, 2),
+
+  delivery_address TEXT    NOT NULL,
+  delivery_coords  GEOGRAPHY(POINT, 4326),
+  delivery_phone   VARCHAR(50),
+  delivery_notes   TEXT,
+
   -- Uber Direct
-  uber_delivery_id VARCHAR(255) UNIQUE,
+  uber_delivery_id  VARCHAR(255) UNIQUE,
   uber_tracking_url TEXT,
-  uber_status VARCHAR(50),
-  
-  -- Статусы
-  status VARCHAR(50) DEFAULT 'pending' CHECK (
-    status IN ('pending', 'cooking', 'courier_assigned', 'in_delivery', 'delivered', 'cancelled')
-  ),
-  payment_status VARCHAR(20) DEFAULT 'unpaid' CHECK (
-    payment_status IN ('unpaid', 'paid', 'refunded')
-  ),
-  
-  -- Временные метки
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  accepted_at TIMESTAMPTZ,
+  uber_status       VARCHAR(50),
+
+  status VARCHAR(50) DEFAULT 'pending'
+         CHECK (status IN (
+           'pending','cooking','courier_assigned',
+           'in_delivery','delivered','cancelled',
+           'rejected','delivery_cancelled'
+         )),
+  payment_status VARCHAR(20) DEFAULT 'unpaid'
+                 CHECK (payment_status IN ('unpaid','paid','refunded')),
+
+  created_at          TIMESTAMPTZ DEFAULT NOW(),
+  accepted_at         TIMESTAMPTZ,
   courier_assigned_at TIMESTAMPTZ,
-  delivered_at TIMESTAMPTZ,
-  
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  delivered_at        TIMESTAMPTZ,
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_orders_customer_id ON public.orders(customer_id);
-CREATE INDEX idx_orders_cook_id ON public.orders(cook_id);
-CREATE INDEX idx_orders_status ON public.orders(status);
-CREATE INDEX idx_orders_telegram_id ON public.orders(telegram_id);
-CREATE INDEX idx_orders_uber_delivery_id ON public.orders(uber_delivery_id);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id       ON public.orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_cook_id           ON public.orders(cook_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status            ON public.orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_telegram_id       ON public.orders(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_orders_uber_delivery_id  ON public.orders(uber_delivery_id);
 
--- ─────────────────────────────────────────────────────────────────────────
--- Таблица: messages (сообщения)
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 5. MESSAGES (сообщения между пользователями)
+-- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.messages (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  sender_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sender_id   UUID REFERENCES public.users(id) ON DELETE CASCADE,
   receiver_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  
-  content TEXT NOT NULL,
-  read BOOLEAN DEFAULT FALSE,
-  
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  request_id  UUID REFERENCES public.requests(id) ON DELETE SET NULL,
+
+  content     TEXT NOT NULL,
+  read        BOOLEAN DEFAULT FALSE,
+
+  created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_messages_sender ON public.messages(sender_id);
-CREATE INDEX idx_messages_receiver ON public.messages(receiver_id);
-CREATE INDEX idx_messages_created_at ON public.messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id   ON public.messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver_id ON public.messages(receiver_id);
+CREATE INDEX IF NOT EXISTS idx_messages_request_id  ON public.messages(request_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at  ON public.messages(created_at DESC);
 
--- ─────────────────────────────────────────────────────────────────────────
--- Таблица: bookmarks (избранное)
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 6. BOOKMARKS (избранное)
+-- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.bookmarks (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id      UUID REFERENCES public.users(id) ON DELETE CASCADE,
   food_item_id UUID REFERENCES public.food_items(id) ON DELETE CASCADE,
-  
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  
+
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+
   UNIQUE(user_id, food_item_id)
 );
 
-CREATE INDEX idx_bookmarks_user_id ON public.bookmarks(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON public.bookmarks(user_id);
 
--- ─────────────────────────────────────────────────────────────────────────
--- Таблица: notifications (уведомления)
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 7. NOTIFICATIONS (уведомления)
+-- =========================================================================
 
 CREATE TABLE IF NOT EXISTS public.notifications (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  
-  type VARCHAR(50) NOT NULL,
-  title VARCHAR(255),
-  message TEXT NOT NULL,
-  read BOOLEAN DEFAULT FALSE,
-  
-  metadata JSONB, -- дополнительные данные (order_id и т.д.)
-  
+  id       UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id  UUID REFERENCES public.users(id) ON DELETE CASCADE,
+
+  type     VARCHAR(50) NOT NULL,  -- message, request, match, system
+  title    VARCHAR(255),
+  message  TEXT NOT NULL,
+  read     BOOLEAN DEFAULT FALSE,
+  metadata JSONB,                  -- доп. данные: order_id, request_id и т.д.
+
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_notifications_user_id ON public.notifications(user_id);
-CREATE INDEX idx_notifications_read ON public.notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read    ON public.notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_type    ON public.notifications(type);
 
--- ─────────────────────────────────────────────────────────────────────────
--- Функция: автоматическое обновление updated_at
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- 8. RECIPES (рецепты)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.recipes (
+  id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id             UUID REFERENCES public.users(id) ON DELETE CASCADE,
+
+  title               VARCHAR(255) NOT NULL,
+  description         TEXT,
+  ingredients         JSONB DEFAULT '[]',
+  -- Пример: [{"name":"Рис","amount":"2 стакана"},{"name":"Баранина","amount":"500г"}]
+  steps               JSONB DEFAULT '[]',
+  -- Пример: [{"step":1,"text":"Промыть рис"},{"step":2,"text":"Обжарить мясо"}]
+
+  cook_time_minutes   INTEGER,
+  servings            INTEGER,
+  image_url           TEXT,
+  linked_food_item_id UUID REFERENCES public.food_items(id) ON DELETE SET NULL,
+  visibility          VARCHAR(20) DEFAULT 'public'
+                      CHECK (visibility IN ('public','private')),
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_recipes_user_id    ON public.recipes(user_id);
+CREATE INDEX IF NOT EXISTS idx_recipes_visibility ON public.recipes(visibility);
+
+-- =========================================================================
+-- 9. RECIPE_COMMENTS (комментарии к рецептам)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS public.recipe_comments (
+  id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  recipe_id UUID REFERENCES public.recipes(id) ON DELETE CASCADE,
+  user_id   UUID REFERENCES public.users(id) ON DELETE CASCADE,
+
+  content   TEXT NOT NULL,
+
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_recipe_comments_recipe_id ON public.recipe_comments(recipe_id);
+CREATE INDEX IF NOT EXISTS idx_recipe_comments_user_id   ON public.recipe_comments(user_id);
+
+-- =========================================================================
+-- TRIGGERS — автообновление updated_at
+-- =========================================================================
 
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -198,101 +298,150 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Применить к таблицам
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users
+CREATE TRIGGER trg_users_updated_at
+  BEFORE UPDATE ON public.users
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_food_items_updated_at BEFORE UPDATE ON public.food_items
+CREATE TRIGGER trg_food_items_updated_at
+  BEFORE UPDATE ON public.food_items
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON public.orders
+CREATE TRIGGER trg_requests_updated_at
+  BEFORE UPDATE ON public.requests
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- ─────────────────────────────────────────────────────────────────────────
--- Row Level Security (RLS) — безопасность на уровне строк
--- ─────────────────────────────────────────────────────────────────────────
+CREATE TRIGGER trg_orders_updated_at
+  BEFORE UPDATE ON public.orders
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Включить RLS для всех таблиц
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.food_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bookmarks ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+CREATE TRIGGER trg_recipes_updated_at
+  BEFORE UPDATE ON public.recipes
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Политики для users
-CREATE POLICY "Пользователи видны всем" ON public.users
-  FOR SELECT USING (true);
+-- =========================================================================
+-- ROW LEVEL SECURITY (RLS)
+-- =========================================================================
 
-CREATE POLICY "Пользователь может обновлять свой профиль" ON public.users
-  FOR UPDATE USING (auth.uid() = auth_id);
+ALTER TABLE public.users           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.food_items      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.requests        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.orders          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bookmarks       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.recipes         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.recipe_comments ENABLE ROW LEVEL SECURITY;
 
--- Политики для food_items
-CREATE POLICY "Блюда видны всем" ON public.food_items
-  FOR SELECT USING (true);
+-- users
+CREATE POLICY "users: read all"        ON public.users FOR SELECT USING (true);
+CREATE POLICY "users: insert own"      ON public.users FOR INSERT WITH CHECK (auth.uid() = auth_id);
+CREATE POLICY "users: update own"      ON public.users FOR UPDATE USING (auth.uid() = auth_id);
 
-CREATE POLICY "Повар может создавать блюда" ON public.food_items
-  FOR INSERT WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = cook_id));
+-- food_items
+CREATE POLICY "food: read all"         ON public.food_items FOR SELECT USING (true);
+CREATE POLICY "food: insert by cook"   ON public.food_items FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = cook_id));
+CREATE POLICY "food: update by cook"   ON public.food_items FOR UPDATE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = cook_id));
+CREATE POLICY "food: delete by cook"   ON public.food_items FOR DELETE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = cook_id));
 
-CREATE POLICY "Повар может редактировать свои блюда" ON public.food_items
-  FOR UPDATE USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = cook_id));
+-- requests
+CREATE POLICY "requests: read own"     ON public.requests FOR SELECT
+  USING (
+    auth.uid() = (SELECT auth_id FROM public.users WHERE id = requester_id) OR
+    auth.uid() = (SELECT auth_id FROM public.users WHERE id = owner_id)
+  );
+CREATE POLICY "requests: insert"       ON public.requests FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = requester_id));
+CREATE POLICY "requests: update own"   ON public.requests FOR UPDATE
+  USING (
+    auth.uid() = (SELECT auth_id FROM public.users WHERE id = requester_id) OR
+    auth.uid() = (SELECT auth_id FROM public.users WHERE id = owner_id)
+  );
 
--- Политики для orders
-CREATE POLICY "Пользователь видит свои заказы" ON public.orders
-  FOR SELECT USING (
+-- orders (читает владелец или повар)
+CREATE POLICY "orders: read own"       ON public.orders FOR SELECT
+  USING (
     auth.uid() = (SELECT auth_id FROM public.users WHERE id = customer_id) OR
     auth.uid() = (SELECT auth_id FROM public.users WHERE id = cook_id)
   );
+CREATE POLICY "orders: insert own"     ON public.orders FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = customer_id));
 
-CREATE POLICY "Пользователь может создавать заказы" ON public.orders
-  FOR INSERT WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = customer_id));
-
--- Политики для messages
-CREATE POLICY "Пользователь видит свои сообщения" ON public.messages
-  FOR SELECT USING (
+-- messages
+CREATE POLICY "messages: read own"     ON public.messages FOR SELECT
+  USING (
     auth.uid() = (SELECT auth_id FROM public.users WHERE id = sender_id) OR
     auth.uid() = (SELECT auth_id FROM public.users WHERE id = receiver_id)
   );
+CREATE POLICY "messages: insert"       ON public.messages FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = sender_id));
 
--- Политики для bookmarks
-CREATE POLICY "Пользователь видит свои закладки" ON public.bookmarks
-  FOR SELECT USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+-- bookmarks
+CREATE POLICY "bookmarks: read own"    ON public.bookmarks FOR SELECT
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "bookmarks: insert"      ON public.bookmarks FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "bookmarks: delete"      ON public.bookmarks FOR DELETE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
 
-CREATE POLICY "Пользователь может создавать закладки" ON public.bookmarks
-  FOR INSERT WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+-- notifications
+CREATE POLICY "notif: read own"        ON public.notifications FOR SELECT
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "notif: update own"      ON public.notifications FOR UPDATE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
 
--- Политики для notifications
-CREATE POLICY "Пользователь видит свои уведомления" ON public.notifications
-  FOR SELECT USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+-- recipes
+CREATE POLICY "recipes: read public"   ON public.recipes FOR SELECT
+  USING (visibility = 'public' OR auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "recipes: insert own"    ON public.recipes FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "recipes: update own"    ON public.recipes FOR UPDATE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "recipes: delete own"    ON public.recipes FOR DELETE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
 
--- ─────────────────────────────────────────────────────────────────────────
--- Функция: поиск поваров рядом (геопоиск)
--- ─────────────────────────────────────────────────────────────────────────
+-- recipe_comments
+CREATE POLICY "r_comments: read all"   ON public.recipe_comments FOR SELECT USING (true);
+CREATE POLICY "r_comments: insert own" ON public.recipe_comments FOR INSERT
+  WITH CHECK (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+CREATE POLICY "r_comments: delete own" ON public.recipe_comments FOR DELETE
+  USING (auth.uid() = (SELECT auth_id FROM public.users WHERE id = user_id));
+
+-- =========================================================================
+-- ФУНКЦИЯ: найти поваров рядом (геопоиск)
+-- =========================================================================
 
 CREATE OR REPLACE FUNCTION find_nearby_cooks(
-  user_lat DOUBLE PRECISION,
-  user_lng DOUBLE PRECISION,
+  user_lat  DOUBLE PRECISION,
+  user_lng  DOUBLE PRECISION,
   radius_km DOUBLE PRECISION DEFAULT 10
 )
 RETURNS TABLE (
-  id UUID,
+  id           UUID,
   display_name VARCHAR,
-  address TEXT,
-  distance_km DOUBLE PRECISION
+  address      TEXT,
+  avatar_url   TEXT,
+  distance_km  DOUBLE PRECISION
 ) AS $$
 BEGIN
   RETURN QUERY
-  SELECT 
+  SELECT
     u.id,
     u.display_name,
     u.address,
-    ST_Distance(
-      u.location::geometry,
-      ST_SetSRID(ST_MakePoint(user_lng, user_lat), 4326)::geometry
-    ) / 1000 AS distance_km
+    u.avatar_url,
+    ROUND(
+      (ST_Distance(
+        u.location::geometry,
+        ST_SetSRID(ST_MakePoint(user_lng, user_lat), 4326)::geometry
+      ) / 1000)::NUMERIC, 1
+    )::DOUBLE PRECISION AS distance_km
   FROM public.users u
-  WHERE 
-    u.role = 'cook' 
+  WHERE
+    u.role = 'cook'
+    AND u.suspended = FALSE
     AND u.location IS NOT NULL
     AND ST_DWithin(
       u.location::geometry,
@@ -301,8 +450,15 @@ BEGIN
     )
   ORDER BY distance_km;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- ─────────────────────────────────────────────────────────────────────────
--- Готово! Запусти этот файл в Supabase SQL Editor
--- ─────────────────────────────────────────────────────────────────────────
+-- =========================================================================
+-- STORAGE BUCKETS (запусти отдельно в Supabase Dashboard или через SQL)
+-- =========================================================================
+
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true);
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('food-images', 'food-images', true);
+
+-- =========================================================================
+-- Готово! Все таблицы созданы.
+-- =========================================================================
