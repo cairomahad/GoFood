@@ -9,10 +9,11 @@ import { toast } from 'react-toastify'
 
 const Login = () => {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, loginAsGuest } = useAuth()
   const [formData, setFormData] = useState({ email: '', password: '' })
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
+  const [guestLoading, setGuestLoading] = useState(false)
 
   const handleChange = (field) => (e) => {
     setFormData({ ...formData, [field]: e.target.value })
@@ -46,6 +47,19 @@ const Login = () => {
       toast.error(error.message || 'Invalid email or password')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleGuestLogin = async () => {
+    setGuestLoading(true)
+    try {
+      await loginAsGuest()
+      toast.success('Вы вошли как гость!')
+      navigate('/feed')
+    } catch (error) {
+      toast.error('Ошибка входа: ' + (error.message || 'Попробуйте позже'))
+    } finally {
+      setGuestLoading(false)
     }
   }
 
@@ -127,6 +141,25 @@ const Login = () => {
 
             <Button type="submit" variant="primary" fullWidth loading={loading} icon={ArrowRight}>
               Sign In
+            </Button>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-neutral-300"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-neutral-50 text-neutral-500">или</span>
+              </div>
+            </div>
+
+            <Button 
+              type="button" 
+              variant="secondary" 
+              fullWidth 
+              loading={guestLoading}
+              onClick={handleGuestLogin}
+            >
+              Войти как гость
             </Button>
           </form>
 

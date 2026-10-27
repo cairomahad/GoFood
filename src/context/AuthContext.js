@@ -82,6 +82,42 @@ export const AuthProvider = ({ children }) => {
     return data
   }
 
+  // ─── Magic Link (вход без пароля) ────────────────────────────────────────
+
+  const sendMagicLink = async (email) => {
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/feed` }
+    })
+    if (error) throw error
+  }
+
+  // ─── Гостевой вход ───────────────────────────────────────────────────────
+
+  const loginAsGuest = async () => {
+    // Создать временный email для гостя
+    const guestEmail = `guest_${Date.now()}_${Math.random().toString(36).substring(7)}@gofoods.app`
+    const guestPassword = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2)
+    
+    // Зарегистрировать и войти
+    const { data, error } = await supabase.auth.signUp({
+      email: guestEmail,
+      password: guestPassword,
+      options: { 
+        data: { display_name: 'Гость' },
+        emailRedirectTo: undefined // Отключить подтверждение email
+      }
+    })
+    if (error) throw error
+
+    // Создать профиль
+    if (data.user) {
+      await createUser(data.user.id, guestEmail, 'Гость')
+    }
+
+    return data
+  }
+
   // ─── Выход ───────────────────────────────────────────────────────────────
 
   const logout = async () => {
@@ -135,7 +171,9 @@ export const AuthProvider = ({ children }) => {
     register,
     resetPassword,
     updatePassword,
-    refetchUser
+    refetchUser,
+    sendMagicLink,
+    loginAsGuest
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
