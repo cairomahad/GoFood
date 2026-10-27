@@ -96,27 +96,41 @@ function App() {
         {/* Protected Routes */}
         <Route
           path="/"
-          element={
-            <ProtectedRoute>
-              <MainLayout />
-            </ProtectedRoute>
-          }
+          element={<MainLayout />}
         >
           <Route index element={<Navigate to="/feed" replace />} />
           <Route path="feed" element={<Feed />} />
           <Route path="food/:id" element={<FoodDetail />} />
           <Route path="map" element={<MapView />} />
-          <Route path="requests" element={<Requests />} />
-          <Route path="tracking/:requestId" element={<TrackingPage />} />
-          <Route path="chat/:requestId" element={<Chat />} />
           <Route path="bookmarks" element={<Bookmarks />} />
-          <Route path="history" element={<DeliveryHistory />} />
-          <Route path="history/route/:requestId" element={<RouteReplay />} />
           <Route path="recipes" element={<Recipes />} />
           <Route path="recipe/:id" element={<RecipeDetail />} />
-          <Route path="my-recipes" element={<MyRecipes />} />
-          <Route path="profile" element={<Profile />} />
-          <Route path="profile/edit" element={<ProfileEdit />} />
+          
+          {/* Требуют авторизацию */}
+          <Route path="requests" element={
+            <ProtectedRoute><Requests /></ProtectedRoute>
+          } />
+          <Route path="tracking/:requestId" element={
+            <ProtectedRoute><TrackingPage /></ProtectedRoute>
+          } />
+          <Route path="chat/:requestId" element={
+            <ProtectedRoute><Chat /></ProtectedRoute>
+          } />
+          <Route path="history" element={
+            <ProtectedRoute><DeliveryHistory /></ProtectedRoute>
+          } />
+          <Route path="history/route/:requestId" element={
+            <ProtectedRoute><RouteReplay /></ProtectedRoute>
+          } />
+          <Route path="my-recipes" element={
+            <ProtectedRoute><MyRecipes /></ProtectedRoute>
+          } />
+          <Route path="profile" element={
+            <ProtectedRoute><Profile /></ProtectedRoute>
+          } />
+          <Route path="profile/edit" element={
+            <ProtectedRoute><ProfileEdit /></ProtectedRoute>
+          } />
         </Route>
 
         {/* Catch all */}

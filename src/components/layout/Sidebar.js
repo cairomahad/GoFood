@@ -29,23 +29,28 @@ import CreatePostModal from '../posts/CreatePostModal'
 const Sidebar = ({ isOpen, onClose }) => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { user, logout } = useAuth()
+  const { user, logout, isAuthenticated } = useAuth()
   const [showCreatePost, setShowCreatePost] = useState(false)
 
   const navItems = [
-    { path: '/feed', icon: Home, label: 'Feed', badge: null },
-    { path: '/map', icon: Map, label: 'Map', badge: null },
-    { path: '/recipes', icon: ChefHat, label: 'Recipes', badge: null },
-    { path: '/my-recipes', icon: BookOpen, label: 'My Recipes', badge: null },
-    { path: '/requests', icon: ClipboardList, label: 'Requests', badge: null },
-    { path: '/history', icon: History, label: 'History', badge: null },
-    { path: '/bookmarks', icon: Bookmark, label: 'Bookmarks', badge: null },
-    { path: '/profile', icon: User, label: 'Profile', badge: null }
+    { path: '/feed', icon: Home, label: 'Feed', badge: null, public: true },
+    { path: '/map', icon: Map, label: 'Map', badge: null, public: true },
+    { path: '/recipes', icon: ChefHat, label: 'Recipes', badge: null, public: true },
+    { path: '/bookmarks', icon: Bookmark, label: 'Bookmarks', badge: null, public: true },
+    { path: '/my-recipes', icon: BookOpen, label: 'My Recipes', badge: null, public: false },
+    { path: '/requests', icon: ClipboardList, label: 'Requests', badge: null, public: false },
+    { path: '/history', icon: History, label: 'History', badge: null, public: false },
+    { path: '/profile', icon: User, label: 'Profile', badge: null, public: false }
   ]
 
   if (user?.role === 'admin' || user?.role === 'moderator') {
-    navItems.push({ path: '/admin', icon: Shield, label: 'Admin', badge: null })
+    navItems.push({ path: '/admin', icon: Shield, label: 'Admin', badge: null, public: false })
   }
+
+  // Фильтровать пункты меню для неавторизованных
+  const visibleNavItems = isAuthenticated 
+    ? navItems 
+    : navItems.filter(item => item.public)
 
   const handleLogout = async () => {
     try {
@@ -95,7 +100,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         {/* Navigation */}
         <nav className="flex-1 p-4 overflow-y-auto">
           <div className="space-y-2">
-            {navItems.map((item, index) => {
+            {visibleNavItems.map((item, index) => {
               const isActive = location.pathname === item.path
               const Icon = item.icon
 
@@ -125,33 +130,46 @@ const Sidebar = ({ isOpen, onClose }) => {
           </div>
         </nav>
 
-        {/* User Profile */}
+        {/* User Profile / Login */}
         <div className="p-4 border-t border-neutral-200">
-          <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-neutral-100 cursor-pointer">
-            <img
-              src={user?.avatarFileId ? getAvatarUrl(user.avatarFileId) : `https://ui-avatars.com/api/?name=${user?.displayName}&background=FF5136&color=fff`}
-              alt={user?.displayName}
-              className="w-10 h-10 rounded-full object-cover"
-            />
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-neutral-900 truncate" style={{ fontFamily: 'Inter, sans-serif' }}>
-                {user?.displayName}
-              </p>
-              <p className="text-sm text-neutral-500 truncate">{user?.email}</p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="w-full mt-2 flex items-center gap-3 px-4 py-3 rounded-xl text-error hover:bg-error/10 transition-all"
-          >
-            <LogOut size={20} />
-            <span className="font-medium">Logout</span>
-          </button>
+          {isAuthenticated ? (
+            <>
+              <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-neutral-100 cursor-pointer">
+                <img
+                  src={user?.avatarFileId ? getAvatarUrl(user.avatarFileId) : `https://ui-avatars.com/api/?name=${user?.displayName}&background=FF5136&color=fff`}
+                  alt={user?.displayName}
+                  className="w-10 h-10 rounded-full object-cover"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-neutral-900 truncate" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    {user?.displayName}
+                  </p>
+                  <p className="text-sm text-neutral-500 truncate">{user?.email}</p>
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="w-full mt-2 flex items-center gap-3 px-4 py-3 rounded-xl text-error hover:bg-error/10 transition-all"
+              >
+                <LogOut size={20} />
+                <span className="font-medium">Logout</span>
+              </button>
+            </>
+          ) : (
+            <Link
+              to="/login"
+              onClick={() => onClose()}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary text-white hover:bg-primary/90 transition-all"
+            >
+              <User size={20} />
+              <span className="font-medium">Войти</span>
+            </Link>
+          )}
         </div>
       </motion.aside>
 
       {/* Floating Create Button - Desktop & Mobile (hidden on chat page) */}
-      {!location.pathname.startsWith('/chat') && (
+      {!location.pathname.startsWith('/chat') && isAuthenticated && (
         <>
           {user?.isVerified ? (
             <button
