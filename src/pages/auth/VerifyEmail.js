@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CheckCircle, XCircle, Loader as LoaderIcon } from 'lucide-react'
-import { account } from '../../config/appwrite'
+import { supabase } from '../../config/supabase'
 import { updateUser } from '../../lib/users'
 import { Button } from '../../components/common/FormElements'
 
@@ -27,13 +27,15 @@ const VerifyEmail = () => {
         return
       }
 
-      await account.updateVerification(userId, secret)
-      
-      // Update user document to mark as verified
-      try {
-        await updateUser(userId, { isVerified: true })
-      } catch (error) {
-        console.error('Failed to update user verification status:', error)
+      // Supabase подтверждает email автоматически через ссылку в письме
+      // Просто обновляем флаг в нашей таблице users
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        try {
+          await updateUser(user.id, { is_verified: true })
+        } catch (error) {
+          console.error('Failed to update user verification status:', error)
+        }
       }
       
       setStatus('success')

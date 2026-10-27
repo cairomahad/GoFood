@@ -1,270 +1,260 @@
-import { databases, DATABASE_ID, Query } from '../config/appwrite'
-import { ID } from 'appwrite'
+import { supabase } from '../config/supabase'
 import { createNotification } from './notifications'
 
-const REQUESTS_COLLECTION_ID = process.env.REACT_APP_APPWRITE_REQUESTS_COLLECTION_ID || 'requests'
+const generateShareToken = () =>
+  `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
 
-const generateShareToken = () => {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`
-}
+// ─── Создание запроса ─────────────────────────────────────────────────────────
 
 export const createRequest = async (data) => {
-  const payload = {
-    foodItemId: data.foodItemId,
-    requesterId: data.requesterId,
-    ownerId: data.ownerId,
-    message: data.message || '',
-    status: 'pending',
-    pickupOrDelivery: data.pickupOrDelivery,
-    proposedTime: data.proposedTime || null,
-    rating: null,
-    feedback: null,
-    confirmedAt: null,
-    handoffPoint: null,
-    requesterLocation: null,
-    ownerLocation: null,
-    shareEnabled: false,
-    shareToken: null,
-    routePath: '[]',
-    completedAt: null
-  }
-  
-  // Override with actual values if provided
-  if (data.handoffPoint) {
-    payload.handoffPoint = typeof data.handoffPoint === 'string' ? data.handoffPoint : JSON.stringify(data.handoffPoint)
-  }
-  if (data.requesterLocation) {
-    payload.requesterLocation = JSON.stringify(data.requesterLocation)
-  }
-  if (data.ownerLocation) {
-    payload.ownerLocation = JSON.stringify(data.ownerLocation)
-  }
+  const { data: request, error } = await supabase
+    .from('requests')
+    .insert({
+      food_item_id: data.foodItemId,
+      requester_id: data.requesterId,
+      owner_id: data.ownerId,
+      message: data.message || '',
+      status: 'pending',
+      pickup_or_delivery: data.pickupOrDelivery,
+      proposed_time: data.proposedTime || null,
+      handoff_point: data.handoffPoint || null,
+      requester_location: data.requesterLocation || null,
+      owner_location: data.ownerLocation || null,
+      share_enabled: false,
+      share_token: null,
+      route_path: []
+    })
+    .select()
+    .single()
 
-  const response = await databases.createDocument(
-    DATABASE_ID,
-    REQUESTS_COLLECTION_ID,
-    ID.unique(),
-    payload
-  )
-  
-  // Create notification for owner
+  if (error) throw error
+
+  // Уведомление владельцу
   try {
     await createNotification({
       userId: data.ownerId,
       type: 'request',
-      payload: {
-        requestId: response.$id,
-        foodItemId: data.foodItemId
-      }
+      payload: { requestId: request.id, foodItemId: data.foodItemId }
     })
-  } catch (error) {
-    console.error('Error creating notification:', error)
+  } catch (e) {
+    console.error('Ошибка уведомления:', e)
   }
-  
-  return response
+
+  return request
 }
 
+// ─── Получение запросов ───────────────────────────────────────────────────────
+
 export const getRequestsByUser = async (userId) => {
-  const queries = [
-    Query.equal('requesterId', userId),
-    Query.limit(50)
-  ]
-  return await databases.listDocuments(DATABASE_ID, REQUESTS_COLLECTION_ID, queries)
+  const { data, error } = await supabase
+    .from('requests')
+    .select('*, food_items(*)')
+    .eq('requester_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (error) throw error
+  return { documents: data || [] }
 }
 
 export const getRequestsByOwner = async (ownerId) => {
-  const queries = [
-    Query.equal('ownerId', ownerId),
-    Query.limit(50)
-  ]
-  return await databases.listDocuments(DATABASE_ID, REQUESTS_COLLECTION_ID, queries)
+  const { data, error } = await supabase
+    .from('requests')
+    .select('*, food_items(*), users!requester_id(display_name, avatar_url)')
+    .eq('owner_id', ownerId)
+    .order('created_at', { ascending: false })
+    .limit(50)
+
+  if (error) throw error
+  return { documents: data || [] }
 }
 
 export const getRequestsByFoodItem = async (foodItemId) => {
-  const queries = [
-    Query.equal('foodItemId', foodItemId),
-    Query.limit(50)
-  ]
-  return await databases.listDocuments(DATABASE_ID, REQUESTS_COLLECTION_ID, queries)
+  const { data, error } = await supabase
+    .from('requests')
+    .select('*, users!requester_id(display_name, avatar_url)')
+    .eq('food_item_id', foodItemId)
+    .limit(50)
+
+  if (error) throw error
+  return { documents: data || [] }
 }
+
+export const getRequestById = async (requestId) => {
+  const { data, error } = await supabase
+    .from('requests')
+    .select('*, food_items(*), users!requester_id(display_name), users!owner_id(display_name)')
+    .eq('id', requestId)
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+// ─── Обновление статуса ───────────────────────────────────────────────────────
 
 export const updateRequestStatus = async (requestId, status, requestData = null) => {
   const updateData = { status }
-  
-  // Include additional data if provided
-  if (requestData?.handoffPoint) {
-    updateData.handoffPoint = typeof requestData.handoffPoint === 'string' ? requestData.handoffPoint : JSON.stringify(requestData.handoffPoint)
-  }
-  if (requestData?.confirmedAt) {
-    updateData.confirmedAt = requestData.confirmedAt
-  }
-  if (requestData?.rating) {
-    updateData.rating = requestData.rating
-  }
-  if (requestData?.feedback) {
-    updateData.feedback = requestData.feedback
-  }
-  
-  const response = await databases.updateDocument(
-    DATABASE_ID,
-    REQUESTS_COLLECTION_ID,
-    requestId,
-    updateData
-  )
-  
-  // Create notification for requester when accepted
+
+  if (requestData?.handoffPoint) updateData.handoff_point = requestData.handoffPoint
+  if (requestData?.confirmedAt) updateData.confirmed_at = requestData.confirmedAt
+  if (requestData?.rating)      updateData.rating = requestData.rating
+  if (requestData?.feedback)    updateData.feedback = requestData.feedback
+
+  const { data, error } = await supabase
+    .from('requests')
+    .update(updateData)
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) throw error
+
   if (status === 'accepted' && requestData) {
     await createNotification({
       userId: requestData.requesterId,
       type: 'match',
-      payload: {
-        requestId: requestId,
-        foodItemId: requestData.foodItemId
-      }
+      payload: { requestId, foodItemId: requestData.foodItemId }
     })
   }
-  
-  return response
+
+  return data
 }
 
-export const getRequestById = async (requestId) => {
-  return await databases.getDocument(DATABASE_ID, REQUESTS_COLLECTION_ID, requestId)
-}
+// ─── Местоположение ───────────────────────────────────────────────────────────
 
 export const updateRequestLocation = async (requestId, location, locationType = 'requester') => {
-  try {
-    const field = locationType === 'requester' ? 'requesterLocation' : 'ownerLocation'
-    return await databases.updateDocument(
-      DATABASE_ID,
-      REQUESTS_COLLECTION_ID,
-      requestId,
-      { [field]: JSON.stringify(location) }
-    )
-  } catch (error) {
-    console.error('Error updating location:', error)
-    // Silently fail if attribute doesn't exist
+  const field = locationType === 'requester' ? 'requester_location' : 'owner_location'
+
+  const { data, error } = await supabase
+    .from('requests')
+    .update({ [field]: location })
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) {
+    console.error('Ошибка обновления локации:', error)
     return null
   }
+  return data
 }
 
 export const updateHandoffPoint = async (requestId, handoffPoint) => {
+  const { data: request, error: fetchError } = await supabase
+    .from('requests')
+    .select('requester_id, owner_id')
+    .eq('id', requestId)
+    .single()
+
+  if (fetchError) throw fetchError
+
+  const { data, error } = await supabase
+    .from('requests')
+    .update({ handoff_point: handoffPoint })
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) throw error
+
   try {
-    const request = await databases.getDocument(DATABASE_ID, REQUESTS_COLLECTION_ID, requestId)
-    
-    // Store as string since Appwrite attribute is string type
-    const handoffPointStr = typeof handoffPoint === 'string' ? handoffPoint : JSON.stringify(handoffPoint)
-    
-    const response = await databases.updateDocument(
-      DATABASE_ID,
-      REQUESTS_COLLECTION_ID,
-      requestId,
-      { handoffPoint: handoffPointStr }
-    )
-    
-    // Notify both parties
-    try {
-      await createNotification({
-        userId: request.requesterId,
-        type: 'system',
-        payload: {
-          requestId: requestId,
-          message: 'Handoff point has been updated'
-        }
-      })
-      
-      await createNotification({
-        userId: request.ownerId,
-        type: 'system',
-        payload: {
-          requestId: requestId,
-          message: 'Handoff point has been updated'
-        }
-      })
-    } catch (notifError) {
-      console.error('Error sending notifications:', notifError)
-    }
-    
-    return response
-  } catch (error) {
-    console.error('Error updating handoff point:', error)
-    throw error
+    await Promise.all([
+      createNotification({ userId: request.requester_id, type: 'system', payload: { requestId, message: 'Handoff point updated' } }),
+      createNotification({ userId: request.owner_id, type: 'system', payload: { requestId, message: 'Handoff point updated' } })
+    ])
+  } catch (e) {
+    console.error('Ошибка уведомления:', e)
   }
+
+  return data
 }
 
+// ─── Завершение ───────────────────────────────────────────────────────────────
+
 export const confirmCompletion = async (requestId, data = {}) => {
-  try {
-    // First get the current request to preserve required fields
-    const currentRequest = await databases.getDocument(DATABASE_ID, REQUESTS_COLLECTION_ID, requestId)
-    
-    const updateData = {
-      status: 'collected',
-      completedAt: new Date().toISOString(),
-      shareEnabled: currentRequest.shareEnabled || false,
-      routePath: currentRequest.routePath || '[]'
-    }
-    
-    if (data.rating) updateData.rating = data.rating
-    if (data.feedback) updateData.feedback = data.feedback
-    if (data.confirmedAt) updateData.confirmedAt = data.confirmedAt
-    
-    return await databases.updateDocument(
-      DATABASE_ID,
-      REQUESTS_COLLECTION_ID,
-      requestId,
-      updateData
-    )
-  } catch (error) {
-    console.error('Error confirming completion:', error)
-    throw error
+  const updateData = {
+    status: 'collected',
+    completed_at: new Date().toISOString()
   }
+
+  if (data.rating)      updateData.rating = data.rating
+  if (data.feedback)    updateData.feedback = data.feedback
+  if (data.confirmedAt) updateData.confirmed_at = data.confirmedAt
+
+  const { data: updated, error } = await supabase
+    .from('requests')
+    .update(updateData)
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return updated
 }
+
+// ─── Trip Sharing ─────────────────────────────────────────────────────────────
 
 export const enableTripSharing = async (requestId) => {
   const shareToken = generateShareToken()
-  return await databases.updateDocument(
-    DATABASE_ID,
-    REQUESTS_COLLECTION_ID,
-    requestId,
-    { shareEnabled: true, shareToken }
-  )
+
+  const { data, error } = await supabase
+    .from('requests')
+    .update({ share_enabled: true, share_token: shareToken })
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const disableTripSharing = async (requestId) => {
-  return await databases.updateDocument(
-    DATABASE_ID,
-    REQUESTS_COLLECTION_ID,
-    requestId,
-    { shareEnabled: false, shareToken: null }
-  )
+  const { data, error } = await supabase
+    .from('requests')
+    .update({ share_enabled: false, share_token: null })
+    .eq('id', requestId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const getSharedTrip = async (shareToken) => {
-  const queries = [
-    Query.equal('shareToken', shareToken),
-    Query.equal('shareEnabled', true),
-    Query.limit(1)
-  ]
-  const response = await databases.listDocuments(DATABASE_ID, REQUESTS_COLLECTION_ID, queries)
-  return response.documents[0] || null
+  const { data, error } = await supabase
+    .from('requests')
+    .select('*')
+    .eq('share_token', shareToken)
+    .eq('share_enabled', true)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
 }
 
 export const saveRouteSnapshot = async (requestId, location) => {
   try {
-    const request = await databases.getDocument(DATABASE_ID, REQUESTS_COLLECTION_ID, requestId)
-    const currentPath = request.routePath ? 
-      (typeof request.routePath === 'string' ? JSON.parse(request.routePath) : request.routePath) 
-      : []
-    
+    const { data: request } = await supabase
+      .from('requests')
+      .select('route_path')
+      .eq('id', requestId)
+      .single()
+
+    const currentPath = Array.isArray(request?.route_path) ? request.route_path : []
     const newPath = [...currentPath, { lat: location.lat, lng: location.lng, timestamp: Date.now() }]
-    
-    return await databases.updateDocument(
-      DATABASE_ID,
-      REQUESTS_COLLECTION_ID,
-      requestId,
-      { routePath: JSON.stringify(newPath) }
-    )
+
+    const { data, error } = await supabase
+      .from('requests')
+      .update({ route_path: newPath })
+      .eq('id', requestId)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data
   } catch (error) {
-    console.error('Error saving route snapshot:', error)
+    console.error('Ошибка сохранения маршрута:', error)
     return null
   }
 }

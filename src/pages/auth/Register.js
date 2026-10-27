@@ -6,7 +6,7 @@ import { Input, Button } from '../../components/common/FormElements'
 import { useAuth } from '../../context/AuthContext'
 import { validateEmail, validatePassword, validateDisplayName } from '../../utils/validation'
 import { createUser } from '../../lib/users'
-import { account } from '../../config/appwrite'
+import { supabase } from '../../config/supabase'
 import { toast } from 'react-toastify'
 
 const Register = () => {
@@ -57,37 +57,27 @@ const Register = () => {
 
     setLoading(true)
     try {
-      // Create auth account
-      const response = await account.create(
-        'unique()',
-        formData.email,
-        formData.password,
-        formData.displayName
-      )
+      // Регистрация через Supabase Auth + создание профиля
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: formData.email,
+        password: formData.password,
+        options: { data: { display_name: formData.displayName } }
+      })
 
-      console.log('Auth account created:', response.$id)
+      if (signUpError) throw signUpError
 
-      // Log in the user first to get proper session
-      await login(formData.email, formData.password)
-
-      console.log('User logged in successfully')
-
-      // Create user document in database
-      try {
-        const userDoc = await createUser(response.$id, formData.email, formData.displayName)
-        console.log('User document created:', userDoc)
-      } catch (dbError) {
-        console.error('Database error:', dbError)
-        toast.error('Account created but profile setup failed. Please contact support.')
+      // Создать профиль в таблице users
+      if (data.user) {
+        try {
+          await createUser(data.user.id, formData.email, formData.displayName)
+        } catch (dbError) {
+          console.error('Database error:', dbError)
+          toast.error('Account created but profile setup failed.')
+        }
       }
 
-      // Send verification email
-      try {
-        await account.createVerification(`${window.location.origin}/verify-email`)
-        toast.success('Verification email sent! Please check your inbox.')
-      } catch (verifyError) {
-        console.error('Verification email error:', verifyError)
-      }
+      // Supabase сам отправляет письмо с подтверждением
+      toast.success('Check your email to confirm your account!')
       
       toast.success('Account created successfully!')
       navigate('/feed')

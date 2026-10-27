@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Map, Marker, Source, Layer, NavigationControl, GeolocateControl } from 'react-map-gl/mapbox'
 import { MapPin, Navigation, Clock, TrendingUp, Loader as LoaderIcon, Radio, Share2, Copy, Check, Shield } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import { client, DATABASE_ID, FOODS_COLLECTION_ID } from '../../config/appwrite'
+import { supabase } from '../../config/supabase'
 import { updateLiveLocation, clearLiveLocation } from '../../lib/foodItems'
 import { enableTripSharing, disableTripSharing, saveRouteSnapshot } from '../../lib/requests'
 import { toast } from 'react-toastify'
@@ -95,21 +95,24 @@ const LocationRouteTab = ({ foodItem, enableTracking = false, requestId = null, 
   useEffect(() => {
     if (!enableTracking || !foodItem.$id) return
 
-    const unsubscribe = client.subscribe(
-      `databases.${DATABASE_ID}.collections.${FOODS_COLLECTION_ID}.documents.${foodItem.$id}`,
-      (response) => {
-        if (response.events.includes('databases.*.collections.*.documents.*.update')) {
-          const updatedItem = response.payload
-          if (updatedItem.liveLocation) {
-            const location = typeof updatedItem.liveLocation === 'string' 
-              ? JSON.parse(updatedItem.liveLocation) 
-              : updatedItem.liveLocation
-            setLiveLocation(location)
-            setTrackingActive(true)
-          }
+    const channel = supabase
+      .channel(`food-item-${foodItem.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'food_items',
+        filter: `id=eq.${foodItem.id}`
+      }, (response) => {
+        const updatedItem = response.new
+        if (updatedItem.live_location) {
+          const location = updatedItem.live_location
+          setLiveLocation(location)
         }
-      }
-    )
+      })
+      .subscribe()
+
+    const unsubscribe = () => supabase.removeChannel(channel)
+
 
     unsubscribeRef.current = unsubscribe
 

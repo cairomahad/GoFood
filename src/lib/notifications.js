@@ -1,102 +1,84 @@
-import { databases, client } from '../config/appwrite'
-import { DATABASE_ID, NOTIFICATIONS_COLLECTION_ID } from '../config/appwrite'
-import { Query } from 'appwrite'
+import { supabase } from '../config/supabase'
 
 export const createNotification = async (notificationData) => {
-  try {
-    const response = await databases.createDocument(
-      DATABASE_ID,
-      NOTIFICATIONS_COLLECTION_ID,
-      'unique()',
-      {
-        userId: notificationData.userId,
-        type: notificationData.type,
-        payload: JSON.stringify(notificationData.payload || {}),
-        read: false
-      }
-    )
-    return response
-  } catch (error) {
-    console.error('Error creating notification:', error)
-    throw error
-  }
+  const { data, error } = await supabase
+    .from('notifications')
+    .insert({
+      user_id: notificationData.userId,
+      type: notificationData.type,
+      title: notificationData.title || null,
+      message: notificationData.message || JSON.stringify(notificationData.payload || {}),
+      metadata: notificationData.payload || {},
+      read: false
+    })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const getUserNotifications = async (userId, limit = 50) => {
-  try {
-    const response = await databases.listDocuments(
-      DATABASE_ID,
-      NOTIFICATIONS_COLLECTION_ID,
-      [
-        Query.equal('userId', userId),
-        Query.orderDesc('$createdAt'),
-        Query.limit(limit)
-      ]
-    )
-    return response.documents.map(notif => ({
-      ...notif,
-      payload: typeof notif.payload === 'string' ? JSON.parse(notif.payload || '{}') : notif.payload
-    }))
-  } catch (error) {
-    console.error('Error fetching notifications:', error)
-    throw error
-  }
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  return data || []
 }
 
 export const markNotificationAsRead = async (notificationId) => {
-  try {
-    const response = await databases.updateDocument(
-      DATABASE_ID,
-      NOTIFICATIONS_COLLECTION_ID,
-      notificationId,
-      { read: true }
-    )
-    return response
-  } catch (error) {
-    console.error('Error marking notification as read:', error)
-    throw error
-  }
+  const { data, error } = await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('id', notificationId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const markAllNotificationsAsRead = async (userId) => {
-  try {
-    const notifications = await getUserNotifications(userId)
-    const unreadNotifications = notifications.filter(n => !n.read)
-    
-    await Promise.all(
-      unreadNotifications.map(n => markNotificationAsRead(n.$id))
-    )
-    
-    return true
-  } catch (error) {
-    console.error('Error marking all notifications as read:', error)
-    throw error
-  }
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('user_id', userId)
+    .eq('read', false)
+
+  if (error) throw error
+  return true
 }
 
 export const deleteNotification = async (notificationId) => {
-  try {
-    await databases.deleteDocument(
-      DATABASE_ID,
-      NOTIFICATIONS_COLLECTION_ID,
-      notificationId
-    )
-    return true
-  } catch (error) {
-    console.error('Error deleting notification:', error)
-    throw error
-  }
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('id', notificationId)
+
+  if (error) throw error
+  return true
 }
 
+// ─── Realtime подписка ────────────────────────────────────────────────────────
+
 export const subscribeToNotifications = (userId, callback) => {
-  const channel = `databases.${DATABASE_ID}.collections.${NOTIFICATIONS_COLLECTION_ID}.documents`
-  
-  return client.subscribe(channel, (response) => {
-    if (response.events.includes('databases.*.collections.*.documents.*')) {
-      const notification = response.payload
-      if (notification.userId === userId) {
-        callback(notification)
-      }
-    }
-  })
+  const channel = supabase
+    .channel(`notifications-${userId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`
+      },
+      (payload) => callback(payload.new)
+    )
+    .subscribe()
+
+  return () => supabase.removeChannel(channel)
 }

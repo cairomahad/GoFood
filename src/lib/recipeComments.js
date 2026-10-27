@@ -1,43 +1,47 @@
-import { databases, DATABASE_ID, Query } from '../config/appwrite'
-import { ID } from 'appwrite'
-
-export const RECIPE_COMMENTS_COLLECTION_ID = process.env.REACT_APP_APPWRITE_RECIPE_COMMENTS_COLLECTION_ID || 'recipecomments'
+import { supabase } from '../config/supabase'
 
 export const createRecipeComment = async (data) => {
-  const payload = {
-    recipeId: data.recipeId,
-    userId: data.userId,
-    content: data.content
-  }
+  const { data: comment, error } = await supabase
+    .from('recipe_comments')
+    .insert({
+      recipe_id: data.recipeId,
+      user_id: data.userId,
+      content: data.content
+    })
+    .select()
+    .single()
 
-  return await databases.createDocument(
-    DATABASE_ID,
-    RECIPE_COMMENTS_COLLECTION_ID,
-    ID.unique(),
-    payload
-  )
+  if (error) throw error
+  return comment
 }
 
 export const getRecipeComments = async (recipeId) => {
-  const queries = [
-    Query.equal('recipeId', recipeId),
-    Query.limit(100)
-  ]
+  const { data, error } = await supabase
+    .from('recipe_comments')
+    .select('*, users!user_id(display_name, avatar_url)')
+    .eq('recipe_id', recipeId)
+    .order('created_at', { ascending: true })
+    .limit(100)
 
-  const response = await databases.listDocuments(DATABASE_ID, RECIPE_COMMENTS_COLLECTION_ID, queries)
-  return response.documents
+  if (error) throw error
+  return data || []
 }
 
 export const getRecipeCommentsCount = async (recipeId) => {
-  const queries = [
-    Query.equal('recipeId', recipeId),
-    Query.limit(1)
-  ]
+  const { count, error } = await supabase
+    .from('recipe_comments')
+    .select('*', { count: 'exact', head: true })
+    .eq('recipe_id', recipeId)
 
-  const response = await databases.listDocuments(DATABASE_ID, RECIPE_COMMENTS_COLLECTION_ID, queries)
-  return response.total
+  if (error) throw error
+  return count || 0
 }
 
 export const deleteRecipeComment = async (commentId) => {
-  return await databases.deleteDocument(DATABASE_ID, RECIPE_COMMENTS_COLLECTION_ID, commentId)
+  const { error } = await supabase
+    .from('recipe_comments')
+    .delete()
+    .eq('id', commentId)
+
+  if (error) throw error
 }

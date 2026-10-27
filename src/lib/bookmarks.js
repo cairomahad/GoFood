@@ -1,52 +1,53 @@
-import { databases, DATABASE_ID, Query } from '../config/appwrite'
-import { ID } from 'appwrite'
-
-const BOOKMARKS_COLLECTION_ID = process.env.REACT_APP_APPWRITE_BOOKMARKS_COLLECTION_ID || 'bookmarks'
+import { supabase } from '../config/supabase'
 
 export const createBookmark = async (userId, foodItemId) => {
-  return await databases.createDocument(
-    DATABASE_ID,
-    BOOKMARKS_COLLECTION_ID,
-    ID.unique(),
-    {
-      userId,
-      foodItemId
-    }
-  )
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .insert({ user_id: userId, food_item_id: foodItemId })
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const getBookmarksByUser = async (userId) => {
-  const queries = [
-    Query.equal('userId', userId),
-    Query.limit(100)
-  ]
-  return await databases.listDocuments(DATABASE_ID, BOOKMARKS_COLLECTION_ID, queries)
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('*, food_items(*)')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return { documents: data || [] }
 }
 
 export const checkBookmark = async (userId, foodItemId) => {
-  const queries = [
-    Query.equal('userId', userId),
-    Query.equal('foodItemId', foodItemId),
-    Query.limit(1)
-  ]
-  const result = await databases.listDocuments(DATABASE_ID, BOOKMARKS_COLLECTION_ID, queries)
-  return result.documents.length > 0 ? result.documents[0] : null
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('food_item_id', foodItemId)
+    .maybeSingle()
+
+  if (error) throw error
+  return data
 }
 
 export const deleteBookmark = async (bookmarkId) => {
-  return await databases.deleteDocument(DATABASE_ID, BOOKMARKS_COLLECTION_ID, bookmarkId)
+  const { error } = await supabase
+    .from('bookmarks')
+    .delete()
+    .eq('id', bookmarkId)
+
+  if (error) throw error
 }
 
 export const deleteBookmarksByFoodItem = async (foodItemId) => {
-  const queries = [
-    Query.equal('foodItemId', foodItemId),
-    Query.limit(100)
-  ]
-  const result = await databases.listDocuments(DATABASE_ID, BOOKMARKS_COLLECTION_ID, queries)
-  
-  const deletePromises = result.documents.map(bookmark => 
-    databases.deleteDocument(DATABASE_ID, BOOKMARKS_COLLECTION_ID, bookmark.$id)
-  )
-  
-  return await Promise.all(deletePromises)
+  const { error } = await supabase
+    .from('bookmarks')
+    .delete()
+    .eq('food_item_id', foodItemId)
+
+  if (error) throw error
 }

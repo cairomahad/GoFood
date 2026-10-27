@@ -480,8 +480,9 @@ const FoodDetail = () => {
                     <button
                       onClick={async () => {
                         try {
-                          const { account } = await import('../../config/appwrite')
-                          await account.createVerification(`${window.location.origin}/verify-email`)
+                          const { supabase } = await import('../../config/supabase')
+                          const { data: { user } } = await supabase.auth.getUser()
+                          await supabase.auth.resend({ type: 'signup', email: user.email })
                           toast.success('Verification email sent! Please check your inbox.')
                         } catch (error) {
                           toast.error(error.message || 'Failed to send verification email')

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Mail, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
-import { account } from '../../config/appwrite'
+import { supabase } from '../../config/supabase'
 import { Button } from '../common/FormElements'
 import { toast } from 'react-toastify'
 
@@ -13,8 +13,8 @@ const EmailVerificationBanner = ({ user, onVerified }) => {
   React.useEffect(() => {
     const checkVerification = async () => {
       try {
-        const session = await account.get()
-        setIsVerified(session.emailVerification)
+        const { data: { user } } = await supabase.auth.getUser()
+        setIsVerified(user?.email_confirmed_at != null)
       } catch (error) {
         console.error('Error checking verification:', error)
         setIsVerified(false)
@@ -26,7 +26,8 @@ const EmailVerificationBanner = ({ user, onVerified }) => {
   const handleResendVerification = async () => {
     setLoading(true)
     try {
-      await account.createVerification(`${window.location.origin}/verify-email`)
+      const { data: { user } } = await supabase.auth.getUser()
+      await supabase.auth.resend({ type: 'signup', email: user.email })
       toast.success('Verification email sent! Please check your inbox.')
     } catch (error) {
       toast.error(error.message || 'Failed to send verification email')
@@ -38,8 +39,8 @@ const EmailVerificationBanner = ({ user, onVerified }) => {
   const handleCheckVerification = async () => {
     setChecking(true)
     try {
-      const session = await account.get()
-      if (session.emailVerification) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.email_confirmed_at) {
         setIsVerified(true)
         toast.success('Email verified successfully!')
         if (onVerified) onVerified()

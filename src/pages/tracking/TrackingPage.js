@@ -7,7 +7,7 @@ import { getRequestById, updateRequestLocation, updateHandoffPoint, confirmCompl
 import { getFoodItemById } from '../../lib/foodItems'
 import { getUserById } from '../../lib/users'
 import { useAuth } from '../../context/AuthContext'
-import { client, DATABASE_ID } from '../../config/appwrite'
+import { supabase } from '../../config/supabase'
 import { Map, Marker, Source, Layer } from 'react-map-gl/mapbox'
 import LiveETATracker from '../../components/map/LiveETATracker'
 import GeofenceAlert from '../../components/map/GeofenceAlert'
@@ -88,27 +88,47 @@ const TrackingPage = () => {
   useEffect(() => {
     if (!requestId) return
 
-    const unsubscribe = client.subscribe(
-      `databases.${DATABASE_ID}.collections.${REQUESTS_COLLECTION_ID}.documents.${requestId}`,
-      (response) => {
-        if (response.events.includes('databases.*.collections.*.documents.*.update')) {
-          const updated = response.payload
-          const locationField = user?.$id === request?.requesterId ? 'ownerLocation' : 'requesterLocation'
-          
-          if (updated[locationField]) {
-            const location = typeof updated[locationField] === 'string' 
-              ? JSON.parse(updated[locationField]) 
-              : updated[locationField]
-            setOtherPartyLocation(location)
-          }
-          
-          // Listen for handoff point updates
-          if (updated.handoffPoint) {
-            queryClient.invalidateQueries(['request', requestId])
-          }
+    const channel = supabase
+      .channel(`request-${requestId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'requests',
+        filter: `id=eq.${requestId}`
+      }, (response) => {
+        const updated = response.new
+        const locationField = user?.id === request?.requester_id ? 'owner_location' : 'requester_location'
+
+        if (updated[locationField]) {
+          setOtherPartyLocation(updated[locationField])
+        }
+
+        if (updated.handoff_point) {
+          queryClient.invalidateQueries(['request', requestId])
+        }
+      })
+      .subscribe()
+
+    const unsubscribe = () => supabase.removeChannel(channel)
+
+    // stub to keep old structure intact
+    const _oldCallback = (response) => {
+      if (response.events.includes('databases.*.collections.*.documents.*.update')) {
+        const updated = response.payload
+        const locationField = user?.$id === request?.requesterId ? 'ownerLocation' : 'requesterLocation'
+        
+        if (updated[locationField]) {
+          const location = typeof updated[locationField] === 'string' 
+            ? JSON.parse(updated[locationField]) 
+            : updated[locationField]
+          setOtherPartyLocation(location)
+        }
+        
+        if (updated.handoffPoint) {
+          queryClient.invalidateQueries(['request', requestId])
         }
       }
-    )
+    }
 
     return () => unsubscribe()
   }, [requestId, request, user, queryClient])

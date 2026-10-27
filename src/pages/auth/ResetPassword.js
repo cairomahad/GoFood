@@ -4,18 +4,16 @@ import { motion } from 'framer-motion'
 import { Lock, ArrowLeft } from 'lucide-react'
 import { Input, Button } from '../../components/common/FormElements'
 import { validatePassword } from '../../utils/validation'
-import { account } from '../../config/appwrite'
+import { useAuth } from '../../context/AuthContext'
 import { toast } from 'react-toastify'
 
 const ResetPassword = () => {
+  const { updatePassword } = useAuth()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const [formData, setFormData] = useState({ password: '', confirmPassword: '' })
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
-
-  const userId = searchParams.get('userId')
-  const secret = searchParams.get('secret')
 
   const handleChange = (field) => (e) => {
     setFormData({ ...formData, [field]: e.target.value })
@@ -41,17 +39,11 @@ const ResetPassword = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    
-    if (!userId || !secret) {
-      toast.error('Invalid reset link')
-      return
-    }
-
     if (!validate()) return
 
     setLoading(true)
     try {
-      await account.updateRecovery(userId, secret, formData.password)
+      await updatePassword(formData.password)
       toast.success('Password reset successfully!')
       navigate('/login')
     } catch (error) {

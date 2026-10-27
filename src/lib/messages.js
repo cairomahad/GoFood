@@ -1,86 +1,101 @@
-import { databases, storage, DATABASE_ID, STORAGE_BUCKET_ID, Query, client } from '../config/appwrite'
+import { supabase } from '../config/supabase'
 import { createNotification } from './notifications'
 import { getRequestById } from './requests'
 
-const MESSAGES_COLLECTION_ID = process.env.REACT_APP_APPWRITE_MESSAGES_COLLECTION_ID || 'messages'
-
 export const createMessage = async (data) => {
-  const payload = {
-    requestId: data.requestId,
-    senderId: data.senderId,
-    text: data.text || '',
-    attachments: JSON.stringify(data.attachments || []),
-    readBy: JSON.stringify([data.senderId])
-  }
-
-  const response = await databases.createDocument(
-    DATABASE_ID,
-    MESSAGES_COLLECTION_ID,
-    'unique()',
-    payload
-  )
-  
-  // Create notification for recipient
-  try {
-    const request = await getRequestById(data.requestId)
-    const recipientId = data.senderId === request.requesterId ? request.ownerId : request.requesterId
-    
-    await createNotification({
-      userId: recipientId,
-      type: 'message',
-      payload: {
-        requestId: data.requestId,
-        senderId: data.senderId
-      }
+  const { data: message, error } = await supabase
+    .from('messages')
+    .insert({
+      sender_id: data.senderId,
+      receiver_id: data.receiverId,
+      content: data.text || '',
+      request_id: data.requestId || null
     })
-  } catch (error) {
-    console.error('Error creating message notification:', error)
-  }
-  
-  return response
-}
+    .select()
+    .single()
 
-export const getMessagesByRequest = async (requestId) => {
-  const queries = [
-    Query.equal('requestId', requestId),
-    Query.limit(100)
-  ]
-  return await databases.listDocuments(DATABASE_ID, MESSAGES_COLLECTION_ID, queries)
-}
+  if (error) throw error
 
-export const markMessageAsRead = async (messageId, userId) => {
-  const message = await databases.getDocument(DATABASE_ID, MESSAGES_COLLECTION_ID, messageId)
-  const readBy = message.readBy ? JSON.parse(message.readBy) : []
-  
-  if (!readBy.includes(userId)) {
-    readBy.push(userId)
-    return await databases.updateDocument(
-      DATABASE_ID,
-      MESSAGES_COLLECTION_ID,
-      messageId,
-      { readBy: JSON.stringify(readBy) }
-    )
+  // Уведомление получателю
+  try {
+    if (data.requestId) {
+      const request = await getRequestById(data.requestId)
+      const recipientId = data.senderId === request.requester_id
+        ? request.owner_id
+        : request.requester_id
+
+      await createNotification({
+        userId: recipientId,
+        type: 'message',
+        payload: { requestId: data.requestId, senderId: data.senderId }
+      })
+    }
+  } catch (e) {
+    console.error('Ошибка уведомления:', e)
   }
-  
+
   return message
 }
 
-export const uploadMessageAttachment = async (file) => {
-  return await storage.createFile(STORAGE_BUCKET_ID, 'unique()', file)
+export const getMessagesByRequest = async (requestId) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*, users!sender_id(display_name, avatar_url)')
+    .eq('request_id', requestId)
+    .order('created_at', { ascending: true })
+    .limit(100)
+
+  if (error) throw error
+  return { documents: data || [] }
 }
 
-export const getAttachmentUrl = (fileId) => {
-  if (!fileId) return null
-  return storage.getFileView(STORAGE_BUCKET_ID, fileId)
+export const markMessageAsRead = async (messageId) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .update({ read: true })
+    .eq('id', messageId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
+
+// ─── Вложения ────────────────────────────────────────────────────────────────
+
+export const uploadMessageAttachment = async (file) => {
+  const path = `attachments/${Date.now()}_${file.name}`
+  const { data, error } = await supabase.storage
+    .from('food-images')
+    .upload(path, file)
+
+  if (error) throw error
+  return data
+}
+
+export const getAttachmentUrl = (path) => {
+  if (!path) return null
+  const { data } = supabase.storage.from('food-images').getPublicUrl(path)
+  return data.publicUrl
+}
+
+// ─── Realtime подписка ────────────────────────────────────────────────────────
 
 export const subscribeToMessages = (requestId, callback) => {
-  return client.subscribe(
-    `databases.${DATABASE_ID}.collections.${MESSAGES_COLLECTION_ID}.documents`,
-    (response) => {
-      if (response.payload.requestId === requestId) {
-        callback(response)
-      }
-    }
-  )
+  const channel = supabase
+    .channel(`messages-${requestId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `request_id=eq.${requestId}`
+      },
+      (payload) => callback(payload)
+    )
+    .subscribe()
+
+  // Возвращаем функцию для отписки
+  return () => supabase.removeChannel(channel)
 }

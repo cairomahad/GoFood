@@ -1,15 +1,29 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import { account } from '../config/appwrite'
+import { supabase } from '../config/supabase'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getUserById, updateUser } from '../lib/users'
+import { getUserById, createUser, saveTelegramId } from '../lib/users'
+
+// ─── Telegram Web App SDK ─────────────────────────────────────────────────────
+
+const getTelegramUser = () => {
+  try {
+    const tg = window.Telegram?.WebApp
+    if (!tg) return null
+    const user = tg.initDataUnsafe?.user
+    if (!user?.id) return null
+    return user // { id, first_name, last_name, username, photo_url }
+  } catch {
+    return null
+  }
+}
+
+// ─── Context ──────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext(null)
 
 export const useAuth = () => {
   const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider')
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider')
   return context
 }
 
@@ -18,47 +32,98 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true)
   const queryClient = useQueryClient()
 
+  // ─── Профиль пользователя ─────────────────────────────────────────────────
+
   const { data: user, isLoading: userLoading, refetch: refetchUser } = useQuery({
-    queryKey: ['currentUser', session?.$id],
+    queryKey: ['currentUser', session?.user?.id],
     queryFn: async () => {
-      const userDoc = await getUserById(session.$id)
-      return userDoc
+      const profile = await getUserById(session.user.id)
+
+      // Сохранить Telegram ID если открыто через Mini App
+      const tgUser = getTelegramUser()
+      if (tgUser) {
+        try {
+          await saveTelegramId(session.user.id, tgUser)
+          console.log('[GoFoods] Telegram ID сохранён:', tgUser.id)
+        } catch (e) {
+          console.warn('[GoFoods] Не удалось сохранить Telegram ID:', e)
+        }
+      }
+
+      return profile
     },
-    enabled: !!session?.$id,
+    enabled: !!session?.user?.id,
     staleTime: 5 * 60 * 1000
   })
 
-  useEffect(() => {
-    checkSession()
-  }, [])
+  // ─── Восстановление сессии при загрузке ──────────────────────────────────
 
-  const checkSession = async () => {
-    try {
-      const currentSession = await account.get()
-      setSession(currentSession)
-    } catch (error) {
-      setSession(null)
-    } finally {
+  useEffect(() => {
+    // Получить текущую сессию
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
       setLoading(false)
-    }
-  }
+    })
+
+    // Слушать изменения auth состояния
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      queryClient.invalidateQueries(['currentUser'])
+    })
+
+    return () => subscription.unsubscribe()
+  }, [queryClient])
+
+  // ─── Вход ────────────────────────────────────────────────────────────────
 
   const login = async (email, password) => {
-    await account.createEmailPasswordSession(email, password)
-    await checkSession()
-    queryClient.invalidateQueries(['currentUser'])
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    return data
   }
 
+  // ─── Выход ───────────────────────────────────────────────────────────────
+
   const logout = async () => {
-    await account.deleteSession('current')
+    const { error } = await supabase.auth.signOut()
+    if (error) throw error
     setSession(null)
     queryClient.clear()
   }
 
+  // ─── Регистрация ─────────────────────────────────────────────────────────
+
   const register = async (email, password, name) => {
-    await account.create('unique()', email, password, name)
-    await login(email, password)
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: name } }
+    })
+    if (error) throw error
+
+    // Создать профиль в таблице users
+    if (data.user) {
+      await createUser(data.user.id, email, name)
+    }
+
+    return data
   }
+
+  // ─── Сброс пароля ────────────────────────────────────────────────────────
+
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`
+    })
+    if (error) throw error
+  }
+
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) throw error
+  }
+
+  // ─── Value ───────────────────────────────────────────────────────────────
 
   const value = {
     session,
@@ -68,7 +133,8 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     register,
-    checkSession,
+    resetPassword,
+    updatePassword,
     refetchUser
   }
 

@@ -4,10 +4,11 @@ import { motion } from 'framer-motion'
 import { Mail, ArrowLeft, CheckCircle } from 'lucide-react'
 import { Input, Button } from '../../components/common/FormElements'
 import { validateEmail } from '../../utils/validation'
-import { account } from '../../config/appwrite'
+import { useAuth } from '../../context/AuthContext'
 import { toast } from 'react-toastify'
 
 const ForgotPassword = () => {
+  const { resetPassword } = useAuth()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -23,10 +24,7 @@ const ForgotPassword = () => {
 
     setLoading(true)
     try {
-      await account.createRecovery(
-        email,
-        `${window.location.origin}/reset-password`
-      )
+      await resetPassword(email)
       setEmailSent(true)
       toast.success('Password reset email sent!')
     } catch (error) {

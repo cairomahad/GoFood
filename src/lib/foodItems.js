@@ -1,213 +1,175 @@
-import { databases, storage, DATABASE_ID, FOODS_COLLECTION_ID, STORAGE_BUCKET_ID, Query } from '../config/appwrite'
-import { ID } from 'appwrite'
+import { supabase } from '../config/supabase'
 import { deleteBookmarksByFoodItem } from './bookmarks'
 
+// ─── Создание блюда ───────────────────────────────────────────────────────────
+
 export const createFoodItem = async (data) => {
-  if (!data.ownerId) {
-    throw new Error('ownerId is required but was not provided')
-  }
+  if (!data.ownerId) throw new Error('ownerId is required')
 
-  const payload = {
-    ownerId: data.ownerId,
-    title: data.title,
-    description: data.description || '',
-    images: data.images || [],
-    foodType: data.foodType,
-    tags: data.tags || '[]',
-    quantity: data.quantity,
-    price: data.price || 0,
-    isDonation: data.isDonation,
-    pickup: data.pickup,
-    delivery: data.delivery,
-    pickupAddress: data.pickupAddress || null,
-    deliveryRadiusKm: data.deliveryRadiusKm || 0,
-    availableFrom: data.availableFrom || new Date().toISOString(),
-    availableUntil: data.availableUntil || null,
-    status: 'active',
-    editCount: 0
-  }
+  const { data: item, error } = await supabase
+    .from('food_items')
+    .insert({
+      cook_id: data.ownerId,
+      name: data.title,
+      description: data.description || '',
+      category: data.foodType,
+      price: data.price || 0,
+      is_donation: data.isDonation || false,
+      status: 'available',
+      // Расширенные поля (если нужны — добавить в schema.sql)
+      tags: data.tags || [],
+      pickup: data.pickup || false,
+      delivery: data.delivery || false,
+      pickup_address: data.pickupAddress || null,
+      delivery_radius_km: data.deliveryRadiusKm || 0,
+      available_from: data.availableFrom || new Date().toISOString(),
+      available_until: data.availableUntil || null,
+      quantity: data.quantity || 1
+    })
+    .select()
+    .single()
 
-  return await databases.createDocument(
-    DATABASE_ID,
-    FOODS_COLLECTION_ID,
-    ID.unique(),
-    payload
-  )
+  if (error) throw error
+  return item
 }
+
+// ─── Список блюд ──────────────────────────────────────────────────────────────
 
 export const getFoodItems = async (filters = {}) => {
-  const queries = [Query.equal('status', 'active'), Query.limit(50)]
-  
+  let query = supabase
+    .from('food_items')
+    .select('*, users!cook_id(display_name, avatar_url, telegram_id)')
+    .eq('status', 'available')
+    .order('created_at', { ascending: false })
+    .limit(50)
+
   if (filters.foodType) {
-    queries.push(Query.equal('foodType', filters.foodType))
-  }
-  
-  if (filters.isDonation !== undefined) {
-    queries.push(Query.equal('isDonation', filters.isDonation))
+    query = query.eq('category', filters.foodType)
   }
 
-  const response = await databases.listDocuments(DATABASE_ID, FOODS_COLLECTION_ID, queries)
-  
-  return {
-    ...response,
-    documents: response.documents.map(item => {
-      let pickupAddress = null
-      if (item.pickupAddress) {
-        try {
-          if (typeof item.pickupAddress === 'string') {
-            pickupAddress = JSON.parse(item.pickupAddress)
-          } else {
-            pickupAddress = item.pickupAddress
-          }
-        } catch (error) {
-          console.error('Error parsing pickupAddress for item:', item.$id, error)
-          pickupAddress = null
-        }
-      }
-      
-      return {
-        ...item,
-        images: typeof item.images === 'string' ? JSON.parse(item.images || '[]') : (item.images || []),
-        tags: typeof item.tags === 'string' ? JSON.parse(item.tags || '[]') : (item.tags || []),
-        pickupAddress
-      }
-    })
+  if (filters.isDonation !== undefined) {
+    query = query.eq('is_donation', filters.isDonation)
   }
+
+  const { data, error } = await query
+  if (error) throw error
+
+  return { documents: data || [] }
 }
+
+// ─── Одно блюдо ───────────────────────────────────────────────────────────────
 
 export const getFoodItemById = async (itemId) => {
-  const item = await databases.getDocument(DATABASE_ID, FOODS_COLLECTION_ID, itemId)
-  
-  // Parse pickupAddress with better error handling
-  let pickupAddress = null
-  if (item.pickupAddress) {
-    try {
-      if (typeof item.pickupAddress === 'string') {
-        pickupAddress = JSON.parse(item.pickupAddress)
-      } else {
-        pickupAddress = item.pickupAddress
-      }
-    } catch (error) {
-      console.error('Error parsing pickupAddress:', error, item.pickupAddress)
-      pickupAddress = null
-    }
-  }
+  const { data, error } = await supabase
+    .from('food_items')
+    .select('*, users!cook_id(display_name, avatar_url, phone, address, location)')
+    .eq('id', itemId)
+    .single()
 
-  // Parse liveLocation with better error handling
-  let liveLocation = null
-  if (item.liveLocation) {
-    try {
-      if (typeof item.liveLocation === 'string') {
-        liveLocation = JSON.parse(item.liveLocation)
-      } else {
-        liveLocation = item.liveLocation
-      }
-    } catch (error) {
-      console.error('Error parsing liveLocation:', error, item.liveLocation)
-      liveLocation = null
-    }
-  }
-  
-  return {
-    ...item,
-    images: typeof item.images === 'string' ? JSON.parse(item.images || '[]') : (item.images || []),
-    tags: typeof item.tags === 'string' ? JSON.parse(item.tags || '[]') : (item.tags || []),
-    pickupAddress,
-    liveLocation
-  }
+  if (error) throw error
+  return data
 }
+
+// ─── Обновление ───────────────────────────────────────────────────────────────
 
 export const updateFoodItem = async (itemId, data) => {
-  return await databases.updateDocument(
-    DATABASE_ID,
-    FOODS_COLLECTION_ID,
-    itemId,
-    data
-  )
+  const { data: updated, error } = await supabase
+    .from('food_items')
+    .update(data)
+    .eq('id', itemId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return updated
 }
+
+// ─── Удаление ─────────────────────────────────────────────────────────────────
 
 export const deleteFoodItem = async (itemId) => {
   await deleteBookmarksByFoodItem(itemId)
-  return await databases.deleteDocument(DATABASE_ID, FOODS_COLLECTION_ID, itemId)
+
+  const { error } = await supabase
+    .from('food_items')
+    .delete()
+    .eq('id', itemId)
+
+  if (error) throw error
 }
 
-export const uploadFoodImage = async (file) => {
-  return await storage.createFile(STORAGE_BUCKET_ID, ID.unique(), file)
+// ─── Изображения (Supabase Storage) ──────────────────────────────────────────
+
+export const uploadFoodImage = async (file, itemId) => {
+  const ext = file.name.split('.').pop()
+  const path = `${itemId || Date.now()}/${Date.now()}.${ext}`
+
+  const { data, error } = await supabase.storage
+    .from('food-images')
+    .upload(path, file, { upsert: true })
+
+  if (error) throw error
+  return data
 }
 
-export const getFoodImageUrl = (fileId, width = 400, height = 400) => {
-  if (!fileId) return null
-  return storage.getFilePreview(STORAGE_BUCKET_ID, fileId, width, height)
+export const getFoodImageUrl = (path) => {
+  if (!path) return null
+  const { data } = supabase.storage.from('food-images').getPublicUrl(path)
+  return data.publicUrl
 }
 
-export const parseFoodItemImages = (item) => {
-  if (!item) return item
-  
-  return {
-    ...item,
-    images: typeof item.images === 'string' ? JSON.parse(item.images || '[]') : (item.images || [])
-  }
+export const deleteFoodImage = async (path) => {
+  const { error } = await supabase.storage.from('food-images').remove([path])
+  if (error) throw error
 }
 
-export const deleteFoodImage = async (fileId) => {
-  return await storage.deleteFile(STORAGE_BUCKET_ID, fileId)
-}
+// ─── Поиск ───────────────────────────────────────────────────────────────────
 
 export const searchFoodItems = async (searchTerm) => {
   if (!searchTerm) return []
-  
-  // Get all active items and filter client-side since fulltext index may not be available
-  const queries = [
-    Query.equal('status', 'active'),
-    Query.limit(100)
-  ]
-  
-  const response = await databases.listDocuments(DATABASE_ID, FOODS_COLLECTION_ID, queries)
-  
-  // Filter by search term client-side
-  const filtered = response.documents.filter(item => 
-    item.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.description?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-  
-  return filtered.slice(0, 20).map(item => {
-    let pickupAddress = null
-    if (item.pickupAddress) {
-      try {
-        if (typeof item.pickupAddress === 'string') {
-          pickupAddress = JSON.parse(item.pickupAddress)
-        } else {
-          pickupAddress = item.pickupAddress
-        }
-      } catch (error) {
-        console.error('Error parsing pickupAddress for item:', item.$id, error)
-        pickupAddress = null
-      }
-    }
-    
-    return {
-      ...item,
-      images: typeof item.images === 'string' ? JSON.parse(item.images || '[]') : (item.images || []),
-      tags: typeof item.tags === 'string' ? JSON.parse(item.tags || '[]') : (item.tags || []),
-      pickupAddress
-    }
-  })
+
+  const { data, error } = await supabase
+    .from('food_items')
+    .select('*')
+    .eq('status', 'available')
+    .or(`name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`)
+    .limit(20)
+
+  if (error) throw error
+  return data
 }
 
+// ─── Live location ────────────────────────────────────────────────────────────
+
 export const updateLiveLocation = async (itemId, location) => {
-  return await databases.updateDocument(
-    DATABASE_ID,
-    FOODS_COLLECTION_ID,
-    itemId,
-    { liveLocation: JSON.stringify(location) }
-  )
+  const { data, error } = await supabase
+    .from('food_items')
+    .update({ live_location: location })
+    .eq('id', itemId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
 }
 
 export const clearLiveLocation = async (itemId) => {
-  return await databases.updateDocument(
-    DATABASE_ID,
-    FOODS_COLLECTION_ID,
-    itemId,
-    { liveLocation: null }
-  )
+  const { data, error } = await supabase
+    .from('food_items')
+    .update({ live_location: null })
+    .eq('id', itemId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+// ─── Вспомогательная функция для обратной совместимости ──────────────────────
+
+export const parseFoodItemImages = (item) => {
+  if (!item) return item
+  return {
+    ...item,
+    images: Array.isArray(item.images) ? item.images : []
+  }
 }

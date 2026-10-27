@@ -7,25 +7,26 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        primary: '#FF5136',      // Appwrite Red (for buttons, CTAs)
-        secondary: '#3B82F6',    // Appwrite Blue (for highlights, links)
-        accent: '#10B981',       // Success / positive actions
+        // Minimal monochrome palette
+        primary: '#0F0F10',      // Main CTAs and strong emphasis
+        secondary: '#2A2A2E',    // Secondary emphasis
+        accent: '#3A3A40',       // Subtle highlights
         neutral: {
-          50: '#F9FAFB',        // Light background / surfaces
-          100: '#F3F4F6',       // Card backgrounds
-          200: '#E5E7EB',       // Subtle borders / dividers
-          300: '#D1D5DB',       // Muted text
-          400: '#9CA3AF',       // Secondary text
-          500: '#6B7280',       // Tertiary text
-          600: '#4B5563',       // Active text / icons
-          700: '#374151',       // Strong text
-          800: '#1F2937',       // Dark mode background / panels
-          900: '#111827',       // Dark text
+          50: '#F7F7F8',        // Page background
+          100: '#EFEFF1',       // Cards
+          200: '#DCDDDF',       // Borders
+          300: '#C4C5C9',       // Disabled surfaces
+          400: '#9A9CA3',       // Muted text
+          500: '#73757D',       // Secondary text
+          600: '#575A62',       // Body text
+          700: '#3C3F46',       // Heading text on light bg
+          800: '#23252B',       // Dark surfaces
+          900: '#111215',       // Highest contrast
         },
-        warning: '#F59E0B',      // Warning / alerts
-        error: '#EF4444',        // Error / destructive actions
-        info: '#3B82F6',         // Info messages
-        success: '#10B981',      // Success messages
+        warning: '#5C5F67',
+        error: '#2B2D33',
+        info: '#4A4D56',
+        success: '#3A3D45',
       },
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui'],

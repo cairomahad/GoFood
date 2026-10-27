@@ -7,12 +7,11 @@ import { useQuery } from '@tanstack/react-query'
 import { getSharedTrip } from '../../lib/requests'
 import { getFoodItemById } from '../../lib/foodItems'
 import { getUserById } from '../../lib/users'
-import { client, DATABASE_ID } from '../../config/appwrite'
+import { supabase } from '../../config/supabase'
 import Loader from '../../components/common/Loader'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN
-const REQUESTS_COLLECTION_ID = process.env.REACT_APP_APPWRITE_REQUESTS_COLLECTION_ID || 'requests'
 
 const SharedTripView = () => {
   const { shareToken } = useParams()
@@ -47,22 +46,24 @@ const SharedTripView = () => {
   })
 
   useEffect(() => {
-    if (!request?.$id) return
+    if (!request?.id) return
 
-    const unsubscribe = client.subscribe(
-      `databases.${DATABASE_ID}.collections.${REQUESTS_COLLECTION_ID}.documents.${request.$id}`,
-      (response) => {
-        if (response.events.includes('databases.*.collections.*.documents.*.update')) {
-          const updatedRequest = response.payload
-          if (updatedRequest.ownerLocation) {
-            const location = typeof updatedRequest.ownerLocation === 'string'
-              ? JSON.parse(updatedRequest.ownerLocation)
-              : updatedRequest.ownerLocation
-            setLiveLocation(location)
-          }
+    const channel = supabase
+      .channel(`shared-trip-${request.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'requests',
+        filter: `id=eq.${request.id}`
+      }, (response) => {
+        const updatedRequest = response.new
+        if (updatedRequest.owner_location) {
+          setLiveLocation(updatedRequest.owner_location)
         }
-      }
-    )
+      })
+      .subscribe()
+
+    const unsubscribe = () => supabase.removeChannel(channel)
 
     unsubscribeRef.current = unsubscribe
 
