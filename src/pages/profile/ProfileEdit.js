@@ -42,8 +42,11 @@ const ProfileEdit = () => {
       }
 
       return await updateUser(userId, {
-        ...data,
-        avatar_url: avatarPath
+        display_name: data.displayName,
+        bio: data.bio,
+        phone: data.phone,
+        location: data.location,
+        avatar_url: avatarPath || null
       })
     },
     onSuccess: () => {
