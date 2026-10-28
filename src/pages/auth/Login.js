@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Mail, Lock, ArrowRight, Loader as LoaderIcon } from 'lucide-react'
+import { Mail, Lock, ArrowRight, AlertCircle, RefreshCw } from 'lucide-react'
 import { Input, Button } from '../../components/common/FormElements'
 import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../config/supabase'
 import { validateEmail, validatePassword } from '../../utils/validation'
 import { toast } from 'react-toastify'
 import { fadeInUp, fadeIn } from '../../utils/animations'
@@ -15,6 +16,8 @@ const Login = () => {
   const [errors, setErrors] = useState({})
   const [loading, setLoading] = useState(false)
   const [guestLoading, setGuestLoading] = useState(false)
+  const [emailNotConfirmed, setEmailNotConfirmed] = useState(false)
+  const [resendLoading, setResendLoading] = useState(false)
 
   const handleChange = (field) => (e) => {
     setFormData({ ...formData, [field]: e.target.value })
@@ -39,15 +42,40 @@ const Login = () => {
     e.preventDefault()
     if (!validate()) return
 
+    setEmailNotConfirmed(false)
     setLoading(true)
     try {
       await login(formData.email, formData.password)
-      toast.success('Welcome back!')
+      toast.success('Добро пожаловать!')
       navigate('/feed')
     } catch (error) {
-      toast.error(error.message || 'Invalid email or password')
+      const msg = error.message || ''
+      if (msg.toLowerCase().includes('email not confirmed')) {
+        // Email не подтверждён — показать блок с повторной отправкой
+        setEmailNotConfirmed(true)
+      } else if (msg.toLowerCase().includes('invalid login credentials')) {
+        toast.error('Неверный email или пароль')
+      } else {
+        toast.error(msg || 'Ошибка входа')
+      }
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleResendConfirmation = async () => {
+    setResendLoading(true)
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: formData.email
+      })
+      if (error) throw error
+      toast.success('Письмо отправлено! Проверь почту.')
+    } catch (error) {
+      toast.error('Не удалось отправить письмо')
+    } finally {
+      setResendLoading(false)
     }
   }
 
@@ -107,6 +135,34 @@ const Login = () => {
               Sign in to continue to GoFoods
             </p>
           </div>
+
+          {/* Блок: email не подтверждён */}
+          {emailNotConfirmed && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex flex-col gap-3"
+            >
+              <div className="flex items-start gap-3">
+                <AlertCircle size={20} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Email не подтверждён</p>
+                  <p className="text-sm text-amber-700 mt-0.5">
+                    Мы отправили письмо на <strong>{formData.email}</strong>. Найди его и нажми на ссылку подтверждения.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleResendConfirmation}
+                disabled={resendLoading}
+                className="flex items-center justify-center gap-2 text-sm font-medium text-amber-700 hover:text-amber-900 disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={resendLoading ? 'animate-spin' : ''} />
+                {resendLoading ? 'Отправляем...' : 'Отправить письмо снова'}
+              </button>
+            </motion.div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <Input

@@ -58,7 +58,7 @@ const Register = () => {
 
     setLoading(true)
     try {
-      // Регистрация через Supabase Auth + создание профиля
+      // 1. Регистрация через Supabase Auth
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
@@ -67,24 +67,39 @@ const Register = () => {
 
       if (signUpError) throw signUpError
 
-      // Создать профиль в таблице users
+      // 2. Создать профиль в таблице users
       if (data.user) {
         try {
           await createUser(data.user.id, formData.email, formData.displayName)
         } catch (dbError) {
           console.error('Database error:', dbError)
-          toast.error('Account created but profile setup failed.')
         }
       }
 
-      // Supabase сам отправляет письмо с подтверждением
-      toast.success('Check your email to confirm your account!')
-      
-      toast.success('Account created successfully!')
-      navigate('/feed')
+      // 3. Если email confirmation выключена — сразу войти
+      if (data.session) {
+        toast.success('Аккаунт создан!')
+        navigate('/feed')
+        return
+      }
+
+      // 4. Если confirmation включена — попробовать сразу войти
+      const { error: loginError } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password
+      })
+
+      if (loginError) {
+        // Email confirmation включена — просим подтвердить
+        toast.info('Аккаунт создан! Проверь почту и подтверди email, затем войди.')
+        navigate('/login')
+      } else {
+        toast.success('Аккаунт создан, добро пожаловать!')
+        navigate('/feed')
+      }
     } catch (error) {
       console.error('Registration error:', error)
-      toast.error(error.message || 'Failed to create account')
+      toast.error(error.message || 'Ошибка регистрации')
     } finally {
       setLoading(false)
     }
