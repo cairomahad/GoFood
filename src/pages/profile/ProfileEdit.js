@@ -30,20 +30,20 @@ const ProfileEdit = () => {
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data) => {
-      let avatarFileId = user?.avatarFileId
+      const userId = user?.authId || user?.$id || user?.auth_id
+      let avatarPath = user?.avatarFileId || user?.avatar_url
 
       // Upload new avatar if selected
       if (avatarFile) {
-        if (avatarFileId) {
-          await deleteAvatar(avatarFileId)
+        if (avatarPath) {
+          try { await deleteAvatar(avatarPath) } catch (_) {}
         }
-        const uploadedFile = await uploadAvatar(avatarFile)
-        avatarFileId = uploadedFile.$id
+        avatarPath = await uploadAvatar(avatarFile, userId)
       }
 
-      return await updateUser(user.$id, {
+      return await updateUser(userId, {
         ...data,
-        avatarFileId
+        avatar_url: avatarPath
       })
     },
     onSuccess: () => {

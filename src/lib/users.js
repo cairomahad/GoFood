@@ -1,5 +1,56 @@
 import { supabase } from '../config/supabase'
 
+// ─── Аватар URL (нужен до normalizeUser) ──────────────────────────────────────
+
+export const getAvatarUrl = (path) => {
+  if (!path) return null
+  if (String(path).startsWith('http')) return path
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+  return data.publicUrl
+}
+
+// ─── Нормализация: snake_case (БД) ↔ camelCase (UI) ──────────────────────────
+
+const normalizeUser = (row) => {
+  if (!row) return null
+  return {
+    ...row,
+    $id: row.auth_id || row.id,
+    authId: row.auth_id,
+    displayName: row.display_name,
+    avatarFileId: row.avatar_url, // путь в Storage (для UI)
+    avatarUrl: row.avatar_url ? getAvatarUrl(row.avatar_url) : null,
+    isVerified: row.is_verified,
+    telegramId: row.telegram_id,
+    telegramUsername: row.telegram_username,
+    telegramNotify: row.telegram_notify,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+const toDbFields = (data = {}) => {
+  const map = {
+    displayName: 'display_name',
+    avatarFileId: 'avatar_url',
+    avatarUrl: 'avatar_url',
+    isVerified: 'is_verified',
+    telegramId: 'telegram_id',
+    telegramUsername: 'telegram_username',
+    telegramNotify: 'telegram_notify'
+  }
+
+  const out = {}
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) continue
+    const dbKey = map[key] || key
+    // Не пропускать Appwrite-поля которых нет в схеме
+    if (['$id', 'authId', 'createdAt', 'updatedAt'].includes(key)) continue
+    out[dbKey] = value
+  }
+  return out
+}
+
 // ─── Пользователи ─────────────────────────────────────────────────────────────
 
 export const createUser = async (userId, email, displayName, telegramId = null) => {
@@ -24,7 +75,7 @@ export const createUser = async (userId, email, displayName, telegramId = null) 
     .single()
 
   if (error) throw error
-  return data
+  return normalizeUser(data)
 }
 
 export const getUserById = async (userId) => {
@@ -35,19 +86,19 @@ export const getUserById = async (userId) => {
     .single()
 
   if (error) throw error
-  return data
+  return normalizeUser(data)
 }
 
 export const updateUser = async (userId, data) => {
   const { data: updated, error } = await supabase
     .from('users')
-    .update(data)
+    .update(toDbFields(data))
     .eq('auth_id', userId)
     .select()
     .single()
 
   if (error) throw error
-  return updated
+  return normalizeUser(updated)
 }
 
 // ─── Telegram ─────────────────────────────────────────────────────────────────
@@ -65,7 +116,7 @@ export const saveTelegramId = async (userId, telegramUser) => {
     .single()
 
   if (error) throw error
-  return data
+  return normalizeUser(data)
 }
 
 export const getUserByTelegramId = async (telegramId) => {
@@ -76,30 +127,26 @@ export const getUserByTelegramId = async (telegramId) => {
     .maybeSingle()
 
   if (error) throw error
-  return data
+  return normalizeUser(data)
 }
 
 // ─── Аватар (Supabase Storage) ────────────────────────────────────────────────
 
 export const uploadAvatar = async (file, userId) => {
   const ext = file.name.split('.').pop()
-  const path = `${userId}/avatar.${ext}`
+  const path = `${userId || 'anon'}/avatar.${ext}`
 
   const { data, error } = await supabase.storage
     .from('avatars')
     .upload(path, file, { upsert: true })
 
   if (error) throw error
+  // Возвращаем путь (сохраняется в users.avatar_url)
   return data.path
 }
 
-export const getAvatarUrl = (path) => {
-  if (!path) return null
-  const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-  return data.publicUrl
-}
-
 export const deleteAvatar = async (path) => {
+  if (!path || String(path).startsWith('http')) return
   const { error } = await supabase.storage.from('avatars').remove([path])
   if (error) throw error
 }
@@ -116,7 +163,7 @@ export const searchUsers = async (searchTerm) => {
     .limit(20)
 
   if (error) throw error
-  return data
+  return (data || []).map(normalizeUser)
 }
 
 // ─── Повара рядом (геопоиск) ───────────────────────────────────────────────────

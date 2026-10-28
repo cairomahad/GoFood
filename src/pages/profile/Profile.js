@@ -25,10 +25,12 @@ const Profile = () => {
     location: null
   })
 
+  const userId = session?.user?.id
+
   const { data: user, isLoading } = useQuery({
-    queryKey: ['user', session?.$id],
-    queryFn: () => getUserById(session.$id),
-    enabled: !!session?.$id,
+    queryKey: ['user', userId],
+    queryFn: () => getUserById(userId),
+    enabled: !!userId,
     onSuccess: (data) => {
       setFormData({
         displayName: data.displayName || '',
@@ -40,9 +42,10 @@ const Profile = () => {
   })
 
   const updateProfileMutation = useMutation({
-    mutationFn: (data) => updateUser(session.$id, data),
+    mutationFn: (data) => updateUser(userId, data),
     onSuccess: () => {
       queryClient.invalidateQueries(['user'])
+      queryClient.invalidateQueries(['currentUser'])
       toast.success('Profile updated successfully!')
       setIsEditing(false)
     },
@@ -66,16 +69,17 @@ const Profile = () => {
         })
       }, 100)
       
-      const fileId = await uploadAvatar(file)
-      await updateUser(session.$id, { avatarFileId: fileId })
+      const path = await uploadAvatar(file, userId)
+      await updateUser(userId, { avatar_url: path })
       
       clearInterval(interval)
       setUploadProgress(100)
       
-      return fileId
+      return path
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['user'])
+      queryClient.invalidateQueries(['currentUser'])
       toast.success('Avatar updated successfully!')
       setTimeout(() => {
         setIsUploading(false)
