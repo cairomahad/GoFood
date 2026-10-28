@@ -22,7 +22,7 @@ import {
   BookOpen
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import { getAvatarUrl } from '../../lib/users'
+import { resolveUserAvatar } from '../../lib/users'
 import { toast } from 'react-toastify'
 import CreatePostModal from '../posts/CreatePostModal'
 
@@ -136,8 +136,8 @@ const Sidebar = ({ isOpen, onClose }) => {
             <>
               <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-neutral-100 cursor-pointer">
                 <img
-                  src={user?.avatarFileId ? getAvatarUrl(user.avatarFileId) : `https://ui-avatars.com/api/?name=${user?.displayName}&background=FF5136&color=fff`}
-                  alt={user?.displayName}
+                  src={resolveUserAvatar(user)}
+                  alt={user?.displayName || 'User'}
                   className="w-10 h-10 rounded-full object-cover"
                 />
                 <div className="flex-1 min-w-0">

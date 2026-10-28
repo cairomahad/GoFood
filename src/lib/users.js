@@ -4,9 +4,28 @@ import { supabase } from '../config/supabase'
 
 export const getAvatarUrl = (path) => {
   if (!path) return null
-  if (String(path).startsWith('http')) return path
-  const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-  return data.publicUrl
+  const value = String(path)
+  if (value.startsWith('http')) return value
+  // fullPath иногда приходит как "avatars/..." — убрать имя bucket
+  const clean = value.replace(/^avatars\//, '')
+  const { data } = supabase.storage.from('avatars').getPublicUrl(clean)
+  return data?.publicUrl || null
+}
+
+/** Универсальный src для <img> из объекта пользователя */
+export const resolveUserAvatar = (user, fallbackName = 'User') => {
+  if (!user) {
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackName)}&background=2A2A2E&color=fff`
+  }
+  const raw = user.avatarUrl || user.avatar_url || user.avatarFileId
+  const url = getAvatarUrl(raw)
+  if (url) {
+    // сбросить кеш браузера после замены файла с тем же путём
+    const sep = url.includes('?') ? '&' : '?'
+    return `${url}${sep}v=${user.updated_at || user.updatedAt || Date.now()}`
+  }
+  const name = user.displayName || user.display_name || fallbackName
+  return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=2A2A2E&color=fff`
 }
 
 // ─── Нормализация: snake_case (БД) ↔ camelCase (UI) ──────────────────────────
@@ -29,23 +48,39 @@ const normalizeUser = (row) => {
   }
 }
 
-const toDbFields = (data = {}) => {
-  const map = {
-    displayName: 'display_name',
-    avatarFileId: 'avatar_url',
-    avatarUrl: 'avatar_url',
-    isVerified: 'is_verified',
-    telegramId: 'telegram_id',
-    telegramUsername: 'telegram_username',
-    telegramNotify: 'telegram_notify'
-  }
+// Только реальные колонки таблицы users (никаких avatarFileId и т.п.)
+const ALLOWED_DB_COLUMNS = new Set([
+  'email',
+  'display_name',
+  'avatar_url',
+  'phone',
+  'bio',
+  'address',
+  'location',
+  'telegram_id',
+  'telegram_username',
+  'telegram_notify',
+  'role',
+  'is_verified',
+  'suspended'
+])
 
+const FIELD_ALIASES = {
+  displayName: 'display_name',
+  avatarFileId: 'avatar_url', // старое Appwrite-имя → Supabase
+  avatarUrl: 'avatar_url',
+  isVerified: 'is_verified',
+  telegramId: 'telegram_id',
+  telegramUsername: 'telegram_username',
+  telegramNotify: 'telegram_notify'
+}
+
+const toDbFields = (data = {}) => {
   const out = {}
   for (const [key, value] of Object.entries(data)) {
     if (value === undefined) continue
-    const dbKey = map[key] || key
-    // Не пропускать Appwrite-поля которых нет в схеме
-    if (['$id', 'authId', 'createdAt', 'updatedAt'].includes(key)) continue
+    const dbKey = FIELD_ALIASES[key] || key
+    if (!ALLOWED_DB_COLUMNS.has(dbKey)) continue // отсечь avatarFileId и мусор
     out[dbKey] = value
   }
   return out
@@ -133,16 +168,23 @@ export const getUserByTelegramId = async (telegramId) => {
 // ─── Аватар (Supabase Storage) ────────────────────────────────────────────────
 
 export const uploadAvatar = async (file, userId) => {
-  const ext = file.name.split('.').pop()
-  const path = `${userId || 'anon'}/avatar.${ext}`
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+  // уникальное имя — чтобы не кешировалась старая картинка
+  const path = `${userId || 'anon'}/avatar_${Date.now()}.${ext}`
 
   const { data, error } = await supabase.storage
     .from('avatars')
-    .upload(path, file, { upsert: true })
+    .upload(path, file, {
+      upsert: true,
+      contentType: file.type || 'image/jpeg'
+    })
 
   if (error) throw error
-  // Возвращаем путь (сохраняется в users.avatar_url)
-  return data.path
+
+  const storedPath = data?.path || path
+  // В БД сохраняем сразу публичный URL — так проще показывать на сайте
+  const publicUrl = getAvatarUrl(storedPath)
+  return publicUrl || storedPath
 }
 
 export const deleteAvatar = async (path) => {

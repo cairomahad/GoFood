@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../../context/AuthContext'
-import { getUserById, updateUser, uploadAvatar, getAvatarUrl } from '../../lib/users'
+import { getUserById, updateUser, uploadAvatar, resolveUserAvatar } from '../../lib/users'
 import { User, Camera, MapPin, Phone, Mail, Edit2, Save, X } from 'lucide-react'
 import { toast } from 'react-toastify'
 import Loader from '../../components/common/Loader'
@@ -69,7 +69,9 @@ const Profile = () => {
         })
       }, 100)
       
+      // 1) файл в Storage bucket "avatars"
       const path = await uploadAvatar(file, userId)
+      // 2) путь только в колонку avatar_url (НЕ avatarFileId)
       await updateUser(userId, { avatar_url: path })
       
       clearInterval(interval)
@@ -80,14 +82,15 @@ const Profile = () => {
     onSuccess: () => {
       queryClient.invalidateQueries(['user'])
       queryClient.invalidateQueries(['currentUser'])
-      toast.success('Avatar updated successfully!')
+      toast.success('Аватар обновлён!')
       setTimeout(() => {
         setIsUploading(false)
         setUploadProgress(0)
       }, 500)
     },
     onError: (error) => {
-      toast.error(error.message || 'Failed to upload avatar')
+      console.error('[Avatar upload]', error)
+      toast.error(error.message || 'Не удалось загрузить аватар')
       setIsUploading(false)
       setUploadProgress(0)
     }
@@ -106,7 +109,13 @@ const Profile = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    updateProfileMutation.mutate(formData)
+    // Только поля, которые есть в схеме Supabase
+    updateProfileMutation.mutate({
+      display_name: formData.displayName,
+      bio: formData.bio,
+      phone: formData.phone,
+      location: formData.location
+    })
   }
 
   const handleCancel = () => {
@@ -123,9 +132,7 @@ const Profile = () => {
     return <Loader fullScreen />
   }
 
-  const avatarUrl = user?.avatarFileId 
-    ? getAvatarUrl(user.avatarFileId) 
-    : `https://ui-avatars.com/api/?name=${user?.displayName}&background=FF5136&color=fff&size=200`
+  const avatarUrl = resolveUserAvatar(user)
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">

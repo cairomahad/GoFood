@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Menu, Search, User, PlusCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-import { getAvatarUrl } from '../../lib/users'
+import { resolveUserAvatar } from '../../lib/users'
 import { motion, AnimatePresence } from 'framer-motion'
 import CreatePostModal from '../posts/CreatePostModal'
 import NotificationDropdown from '../notifications/NotificationDropdown'
@@ -70,8 +70,8 @@ const Topbar = ({ onMenuClick, onSearch }) => {
           {isAuthenticated ? (
             <Link to="/profile" className="hidden sm:block flex-shrink-0">
               <img
-                src={user?.avatarFileId ? getAvatarUrl(user.avatarFileId) : `https://ui-avatars.com/api/?name=${user?.displayName}&background=FF5136&color=fff`}
-                alt={user?.displayName}
+                src={resolveUserAvatar(user)}
+                alt={user?.displayName || 'User'}
                 className="w-10 h-10 rounded-full object-cover border-2 border-neutral-200 hover:border-primary transition-colors"
               />
             </Link>
