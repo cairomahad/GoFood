@@ -6,6 +6,7 @@ import { getFoodImageUrl } from '../../lib/foodItems'
 import { calculateDistance, formatDistance, getTimeRemaining } from '../../utils/distance'
 import { useAuth } from '../../context/AuthContext'
 import BookmarkButton from '../bookmarks/BookmarkButton'
+import { fadeInUp, cardHover } from '../../utils/animations'
 
 const FoodCard = ({ item, index }) => {
   const { user } = useAuth()
@@ -26,9 +27,11 @@ const FoodCard = ({ item, index }) => {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
+      custom={index}
+      initial="hidden"
+      animate="visible"
+      variants={fadeInUp}
+      whileHover={cardHover}
     >
       <Link to={`/food/${item.$id}`}>
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden hover:shadow-md transition-all group">

@@ -8,6 +8,7 @@ import { validateEmail, validatePassword, validateDisplayName } from '../../util
 import { createUser } from '../../lib/users'
 import { supabase } from '../../config/supabase'
 import { toast } from 'react-toastify'
+import { fadeInUp, fadeIn } from '../../utils/animations'
 
 const Register = () => {
   const navigate = useNavigate()
@@ -101,9 +102,9 @@ const Register = () => {
         />
         <div className="absolute inset-0 flex items-center justify-center p-12">
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
+            variants={fadeIn}
+            initial="hidden"
+            animate="visible"
             className="text-white text-center"
           >
             <h1 className="text-5xl font-bold mb-4" style={{ fontFamily: 'Poppins, sans-serif' }}>
@@ -119,8 +120,9 @@ const Register = () => {
       {/* Right Side - Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-neutral-50">
         <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
+          variants={fadeInUp}
+          initial="hidden"
+          animate="visible"
           className="w-full max-w-md"
         >
           <div className="mb-8">

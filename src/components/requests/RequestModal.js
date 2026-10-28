@@ -7,6 +7,7 @@ import { useAuth } from '../../context/AuthContext'
 import { toast } from 'react-toastify'
 import { Button } from '../common/FormElements'
 import AuthModal from '../auth/AuthModal'
+import { modalVariants, overlayVariants } from '../../utils/animations'
 
 const RequestModal = ({ isOpen, onClose, foodItem }) => {
   const { session, isAuthenticated } = useAuth()
@@ -60,11 +61,18 @@ const RequestModal = ({ isOpen, onClose, foodItem }) => {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+      <motion.div 
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        variants={overlayVariants}
+      >
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
+          variants={modalVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
           className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
         >
           <div className="p-6 border-b border-neutral-200 flex items-center justify-between">
@@ -162,7 +170,7 @@ const RequestModal = ({ isOpen, onClose, foodItem }) => {
             </Button>
           </form>
         </motion.div>
-      </div>
+      </motion.div>
 
       <AuthModal 
         isOpen={showAuthModal} 

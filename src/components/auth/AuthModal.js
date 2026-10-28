@@ -5,6 +5,7 @@ import { Input, Button } from '../common/FormElements'
 import { useAuth } from '../../context/AuthContext'
 import { validateEmail, validatePassword } from '../../utils/validation'
 import { toast } from 'react-toastify'
+import { modalVariants, overlayVariants } from '../../utils/animations'
 
 const AuthModal = ({ isOpen, onClose, onSuccess }) => {
   const { login, register, loginAsGuest } = useAuth()
@@ -75,11 +76,18 @@ const AuthModal = ({ isOpen, onClose, onSuccess }) => {
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <motion.div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      variants={overlayVariants}
+    >
       <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
         className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
       >
         <div className="p-6 border-b border-neutral-200 flex items-center justify-between">
@@ -161,7 +169,7 @@ const AuthModal = ({ isOpen, onClose, onSuccess }) => {
           </div>
         </form>
       </motion.div>
-    </div>
+    </motion.div>
   )
 }
 
